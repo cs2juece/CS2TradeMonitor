@@ -1,0 +1,127 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationIcon>resources\assets\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>CS2TradeMonitor</AssemblyName>
+    <RootNamespace>CS2TradeMonitor</RootNamespace>
+    <Title>CS2 Trade Monitor</Title>
+    <Product>CS2 Trade Monitor / CS2交易监控</Product>
+    <Description>CS2 Trade Monitor / CS2交易监控</Description>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <DebugType Condition="'$(CoverageBuild)' != 'true'">none</DebugType>
+    <DebugSymbols Condition="'$(CoverageBuild)' != 'true'">false</DebugSymbols>
+    <DebugType Condition="'$(CoverageBuild)' == 'true'">portable</DebugType>
+    <DebugSymbols Condition="'$(CoverageBuild)' == 'true'">true</DebugSymbols>
+
+    <Version>1.35</Version><!-- 发布版本的唯一来源；程序集与文件版本由 SDK 派生。 -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Custom controls are composed entirely in code and are not serialized by the WinForms designer. -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+  </PropertyGroup>
+
+  <!-- 自动复制 lang 与图文指引资源 -->
+  <ItemGroup>
+    <Content Include="resources\lang\*.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+
+    <Content Include="resources\api-help\*.png" Condition="Exists('resources\api-help')">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+
+    <Content Include="resources\steamdt_items.json.gz" Condition="Exists('resources\steamdt_items.json.gz')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+
+    <Content Include="resources\author-note.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="使用说明(必读).txt">
+      <TargetPath>使用说明(必读).txt</TargetPath>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+
+    <Content Include="THIRD_PARTY_NOTICES.txt">
+      <TargetPath>docs\THIRD_PARTY_NOTICES.txt</TargetPath>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="CS2TradeMonitor.Tests\**" />
+    <EmbeddedResource Remove="CS2TradeMonitor.Tests\**" />
+    <None Remove="CS2TradeMonitor.Tests\**" />
+    <Compile Remove="CS2TradeMonitor.Wpf\**" />
+    <EmbeddedResource Remove="CS2TradeMonitor.Wpf\**" />
+    <None Remove="CS2TradeMonitor.Wpf\**" />
+    <Compile Remove="CS2TradeMonitor.Updater\**" />
+    <EmbeddedResource Remove="CS2TradeMonitor.Updater\**" />
+    <None Remove="CS2TradeMonitor.Updater\**" />
+    <Compile Remove="CS2TradeMonitor.Bootstrapper\**" />
+    <EmbeddedResource Remove="CS2TradeMonitor.Bootstrapper\**" />
+    <None Remove="CS2TradeMonitor.Bootstrapper\**" />
+  </ItemGroup>
+
+  <!-- 引入文件资源管理 -->
+  <ItemGroup>
+    <Compile Update="Properties\Resources.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="src\UI\Settings\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AntdUI" Version="2.4.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
+  </ItemGroup>
+
+  <!-- This is a WinForms app; the WebView2 package adds its WPF assembly too,
+       which creates a WindowsBase version conflict warning. Keep only Core/WinForms. -->
+  <Target Name="RemoveUnusedWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Clean up unused native WPF DLLs for WinForms deployment. -->
+  <Target Name="DeleteUnusedWpfDlls" BeforeTargets="GenerateSingleFileBundle">
+    <ItemGroup>
+      <UnusedDlls Include="$(PublishDir)D3DCompiler_47_cor3.dll" />
+      <UnusedDlls Include="$(PublishDir)PenImc_cor3.dll" />
+      <UnusedDlls Include="$(PublishDir)PresentationNative_cor3.dll" />
+      <UnusedDlls Include="$(PublishDir)wpfgfx_cor3.dll" />
+    </ItemGroup>
+    <Delete Files="@(UnusedDlls)" ContinueOnError="true" />
+  </Target>
+</Project>

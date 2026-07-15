@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CS2TradeMonitor.Updater</AssemblyName>
+    <RootNamespace>CS2TradeMonitor.Updater</RootNamespace>
+    <Title>CS2 Trade Monitor Updater</Title>
+    <Product>CS2 Trade Monitor / CS2交易监控</Product>
+    <Description>CS2 Trade Monitor Updater / CS2交易监控更新器</Description>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <DefineConstants>$(DefineConstants);UPDATER_BUILD</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\src\Core\UpdatePackageFilePolicy.cs" Link="Shared\UpdatePackageFilePolicy.cs" />
+    <Compile Include="..\src\Core\ProgramFileManifest.cs" Link="Shared\ProgramFileManifest.cs" />
+    <Compile Include="..\src\Infrastructure\Paths\InstanceIdentity.cs" Link="Shared\InstanceIdentity.cs" />
+    <Compile Include="..\src\Infrastructure\Paths\WindowsCanonicalPathResolver.cs" Link="Shared\WindowsCanonicalPathResolver.cs" />
+  </ItemGroup>
+</Project>

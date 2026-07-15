@@ -1,0 +1,38 @@
+name: Public source build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Restore and build public source
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore .\CS2TradeMonitor.sln
+
+      - name: Build Debug
+        run: dotnet build .\CS2TradeMonitor.sln -c Debug --no-restore
+
+      - name: Build Release
+        run: dotnet build .\CS2TradeMonitor.sln -c Release --no-restore

@@ -1,0 +1,81 @@
+# IDE / VS
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+bin/
+obj/
+**/bin/
+**/obj/
+bin/release-package/
+publish/
+release/
+releases/
+artifacts/
+TestResults/
+coverage/
+.cache/
+scratch/
+*.trx
+*.coverage
+*.coveragexml
+*.nupkg
+
+# Config / Secret
+.env*
+settings.json*
+settings*.json
+youpin_auth.dat
+*.token
+*.cookie
+*.credential
+*.secret
+*token*.txt
+*cookie*.txt
+*credential*.txt
+*secret*.txt
+tokens/
+cookies/
+credentials/
+secrets/
+
+# Logs
+*.log
+logs/
+
+# Runtime user data
+data/
+history/
+runtime/
+
+# Compressed/installation/debug artifacts
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+*.gz
+*.msi
+*.pkg
+*.pdb
+*.dmp
+*.tmp
+*.bak
+*.cache
+!resources/steamdt_items.json.gz
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Source-controlled binaries to exclude specifically
+resources/CS2DesktopMonitor.Updater.exe
+resources/steamdt_items.json
+resources/assets/driver.zip
+resources/assets/LiteMonitorFPS.exe
+resources/assets/PawnIO_setup.exe

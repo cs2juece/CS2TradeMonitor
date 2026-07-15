@@ -1,0 +1,31 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11201.2
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CS2TradeMonitor", "CS2TradeMonitor.csproj", "{23AEC60E-F48F-2CE6-4BD3-D37E306CCCF8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CS2TradeMonitor.Updater", "CS2TradeMonitor.Updater\CS2TradeMonitor.Updater.csproj", "{D3D4D140-4B9D-4FD5-9652-336B2C86D8A1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{23AEC60E-F48F-2CE6-4BD3-D37E306CCCF8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{23AEC60E-F48F-2CE6-4BD3-D37E306CCCF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{23AEC60E-F48F-2CE6-4BD3-D37E306CCCF8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{23AEC60E-F48F-2CE6-4BD3-D37E306CCCF8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D3D4D140-4B9D-4FD5-9652-336B2C86D8A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D3D4D140-4B9D-4FD5-9652-336B2C86D8A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D3D4D140-4B9D-4FD5-9652-336B2C86D8A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D3D4D140-4B9D-4FD5-9652-336B2C86D8A1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F6826114-276E-43DF-B0F5-FB52FBD92A2F}
+	EndGlobalSection
+EndGlobal
