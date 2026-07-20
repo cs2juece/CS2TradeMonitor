@@ -678,6 +678,8 @@ namespace CS2TradeMonitor
             if (_form.IsDisposed || _disposed)
                 return;
 
+            _ = PhoneAlertNotificationDelivery.SendIfRequestedAsync(_cfg, _phoneAlerts, e);
+
             void ShowLocal()
             {
                 if (_form.IsDisposed || _disposed)

@@ -14,6 +14,7 @@ using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core.Refresh;
 using CS2TradeMonitor.Domain.Market;
+using CS2MarketData.Core;
 using static CS2TradeMonitor.Application.Market.SteamDtItemJsonParser;
 
 
@@ -41,7 +42,7 @@ namespace CS2TradeMonitor.Application.Market
                         foreach (var item in _baseItemsCache)
                         {
                             if (string.IsNullOrWhiteSpace(item.MarketHashName)) continue;
-                            if (IsMatch(item.Name, item.MarketHashName, keyword))
+                            if (SteamDtItemCatalog.Matches(item.Name, item.MarketHashName, keyword))
                             {
                                 if (seenHashNames.Add(item.MarketHashName))
                                 {
@@ -77,18 +78,25 @@ namespace CS2TradeMonitor.Application.Market
             // 2. Always supplement with the local full item database.
             // The SteamDT base endpoint is quota-limited and may be absent; the user-provided
             // 25k item JSON is the stable search source for "all items can be searched".
-            await Task.Run(LoadLocalItemsFile);
-            if (_localItemsCache != null && _localItemsCache.Count > 0)
+            if (_localItemCatalog == null)
+                await Task.Run(LoadLocalItemsFile);
+
+            SteamDtItemCatalog? localCatalog = _localItemCatalog;
+            if (localCatalog != null && localCatalog.Count > 0)
             {
-                foreach (var item in _localItemsCache)
+                foreach (SteamDtCatalogItem item in localCatalog.Search(keyword, 100))
                 {
-                    if (IsMatch(item.Name, item.MarketHashName, keyword))
+                    if (seenHashNames.Add(item.MarketHashName))
                     {
-                        string key = !string.IsNullOrWhiteSpace(item.MarketHashName) ? item.MarketHashName : item.ItemId;
-                        if (seenHashNames.Add(key))
+                        results.Add(new SteamDtSearchCandidate
                         {
-                            results.Add(item);
-                        }
+                            ItemId = string.IsNullOrWhiteSpace(item.MarketHashName) ? item.ItemId : item.MarketHashName,
+                            Name = item.Name,
+                            Price = 0,
+                            Source = "本地库",
+                            MarketHashName = item.MarketHashName,
+                            PlatformItemId = item.ItemId
+                        });
                     }
                 }
             }
@@ -160,11 +168,11 @@ namespace CS2TradeMonitor.Application.Market
                 distinct.Add(item);
             }
 
-            string normalizedKeyword = NormalizeForSearch(keyword);
+            string normalizedKeyword = SteamDtItemCatalog.Normalize(keyword);
             int Score(SteamDtSearchCandidate item)
             {
-                string name = NormalizeForSearch(item.Name);
-                string hash = NormalizeForSearch(item.MarketHashName);
+                string name = SteamDtItemCatalog.Normalize(item.Name);
+                string hash = SteamDtItemCatalog.Normalize(item.MarketHashName);
                 if (name.Equals(normalizedKeyword, StringComparison.OrdinalIgnoreCase) ||
                     hash.Equals(normalizedKeyword, StringComparison.OrdinalIgnoreCase))
                     return 0;
@@ -293,55 +301,29 @@ namespace CS2TradeMonitor.Application.Market
 
         private void LoadLocalItemsFile()
         {
-            if (_localItemsCache != null) return;
+            if (_localItemCatalog != null) return;
 
             using (AppPerformanceProfiler.Measure("SteamDtItemService.LoadLocalItemsFile", "File=steamdt_items.json.gz", thresholdMs: 1))
             {
                 lock (_localCacheLock)
                 {
-                    if (_localItemsCache != null) return;
+                    if (_localItemCatalog != null) return;
 
-                    var list = new List<SteamDtSearchCandidate>();
                     try
                     {
                         string? path = GetLocalItemsFilePath();
                         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
                         {
-                            string json = ReadLocalItemsFileText(path);
-                            using var doc = JsonDocument.Parse(json);
-                            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var elem in doc.RootElement.EnumerateArray())
-                                {
-                                    string id = "";
-                                    if (elem.TryGetProperty("id", out var idProp))
-                                    {
-                                        id = idProp.ValueKind == JsonValueKind.Number ? idProp.GetInt64().ToString() : idProp.GetString() ?? "";
-                                    }
-                                    string name = elem.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                                    string marketHashName = elem.TryGetProperty("market_hash_name", out var mhnProp) ? mhnProp.GetString() ?? "" : "";
-
-                                    if (!string.IsNullOrEmpty(name))
-                                    {
-                                        list.Add(new SteamDtSearchCandidate
-                                        {
-                                            ItemId = !string.IsNullOrEmpty(marketHashName) ? marketHashName : id,
-                                            Name = name,
-                                            Price = 0,
-                                            Source = "本地库",
-                                            MarketHashName = marketHashName,
-                                            PlatformItemId = id
-                                        });
-                                    }
-                                }
-                            }
+                            using FileStream file = File.OpenRead(path);
+                            _localItemCatalog = path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)
+                                ? SteamDtItemCatalog.LoadGzip(file)
+                                : SteamDtItemCatalog.LoadJson(file);
                         }
                     }
                     catch (Exception ex)
                     {
                         DiagnosticsLogger.Info("SteamDTItem", $"加载本地饰品文件异常: {ex.Message}");
                     }
-                    _localItemsCache = list;
                 }
             }
         }
@@ -349,81 +331,14 @@ namespace CS2TradeMonitor.Application.Market
 
         private static string? GetLocalItemsFilePath()
         {
-            string fileName = "steamdt_items.json";
             string gzFileName = "steamdt_items.json.gz";
-            var candidates = new List<string>
+            string[] candidates =
             {
                 Path.Combine(global::CS2TradeMonitor.src.SystemServices.InstallationPaths.ResourcesDirectory, gzFileName),
-                Path.Combine(global::CS2TradeMonitor.src.SystemServices.InstallationPaths.InstallDirectory, gzFileName),
-                Path.Combine(Environment.CurrentDirectory, "resources", gzFileName),
-                Path.Combine(global::CS2TradeMonitor.src.SystemServices.InstallationPaths.ResourcesDirectory, fileName),
-                Path.Combine(global::CS2TradeMonitor.src.SystemServices.InstallationPaths.InstallDirectory, fileName),
-                Path.Combine(global::CS2TradeMonitor.src.SystemServices.InstallationPaths.ResourcesDirectory, "饰品id_20260423（后缀更新为json）.txt"),
-                Path.Combine(Environment.CurrentDirectory, "resources", fileName),
-                Path.Combine(Environment.CurrentDirectory, "resources", "饰品id_20260423（后缀更新为json）.txt"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "饰品id_20260423（后缀更新为json）.txt")
+                Path.Combine(global::CS2TradeMonitor.src.SystemServices.InstallationPaths.InstallDirectory, gzFileName)
             };
 
             return candidates.FirstOrDefault(File.Exists);
-        }
-
-
-        private static string ReadLocalItemsFileText(string path)
-        {
-            if (path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
-            {
-                using var file = File.OpenRead(path);
-                using var gzip = new GZipStream(file, CompressionMode.Decompress);
-                using var reader = new StreamReader(gzip, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-                return reader.ReadToEnd();
-            }
-
-            return File.ReadAllText(path, Encoding.UTF8);
-        }
-
-
-        private static bool IsMatch(string name, string marketHashName, string keyword)
-        {
-            if (string.IsNullOrWhiteSpace(keyword)) return false;
-
-            var parts = keyword.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0) return false;
-
-            string normCn = NormalizeForSearch(name);
-            string normEn = NormalizeForSearch(marketHashName);
-
-            foreach (var part in parts)
-            {
-                string normPart = NormalizeForSearch(part);
-                if (string.IsNullOrEmpty(normPart)) continue;
-
-                bool matchCn = normCn.Contains(normPart);
-                bool matchEn = normEn.Contains(normPart);
-
-                if (!matchCn && !matchEn)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-
-        private static string NormalizeForSearch(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return "";
-
-            var sb = new System.Text.StringBuilder();
-            foreach (char c in text)
-            {
-                if (!char.IsWhiteSpace(c) && c != '(' && c != ')' && c != '[' && c != ']' && c != '（' && c != '）' && c != '|' && c != '-')
-                {
-                    char target = c == '*' ? '★' : char.ToLowerInvariant(c);
-                    sb.Append(target);
-                }
-            }
-            return sb.ToString();
         }
 
     }

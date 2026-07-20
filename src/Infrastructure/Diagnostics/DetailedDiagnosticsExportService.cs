@@ -71,28 +71,50 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
 
                 bool includedRegular = false;
                 string regularLogPath = _instance.GetLogFile("CS2TradeMonitor_Error.log");
-                if (File.Exists(regularLogPath))
+                var filteredRegular = new StringBuilder();
+                foreach (string candidate in EnumerateRegularLogFiles(regularLogPath))
                 {
                     string filtered = FilterRegularLog(
-                        File.ReadAllLines(regularLogPath, Encoding.UTF8),
+                        File.ReadAllLines(candidate, Encoding.UTF8),
                         startUtc,
                         endUtc);
                     if (!string.IsNullOrWhiteSpace(filtered))
-                    {
-                        Directory.CreateDirectory(regularDirectory);
-                        File.WriteAllText(
-                            Path.Combine(regularDirectory, "CS2TradeMonitor_Error.log"),
-                            _diagnostics.SanitizeText(filtered),
-                            new UTF8Encoding(false));
-                        includedRegular = true;
-                    }
+                        filteredRegular.Append(filtered);
+                }
+                if (filteredRegular.Length > 0)
+                {
+                    Directory.CreateDirectory(regularDirectory);
+                    File.WriteAllText(
+                        Path.Combine(regularDirectory, "CS2TradeMonitor_Error.log"),
+                        _diagnostics.SanitizeText(filteredRegular.ToString()),
+                        new UTF8Encoding(false));
+                    includedRegular = true;
+                }
+
+                bool includedUpdater = false;
+                string updaterLogPath = _instance.GetUpdateFile("CS2TradeMonitor_UpdateDiagnostic.jsonl");
+                var filteredUpdater = new StringBuilder();
+                foreach (string candidate in EnumerateCurrentAndRotated(updaterLogPath, 1))
+                    filteredUpdater.Append(FilterJsonLines(candidate, startUtc, endUtc));
+                if (filteredUpdater.Length > 0)
+                {
+                    string updaterDirectory = Path.Combine(workspace, "updater");
+                    Directory.CreateDirectory(updaterDirectory);
+                    File.WriteAllText(
+                        Path.Combine(updaterDirectory, "CS2TradeMonitor_UpdateDiagnostic.jsonl"),
+                        _diagnostics.SanitizeText(filteredUpdater.ToString()),
+                        new UTF8Encoding(false));
+                    includedUpdater = true;
                 }
 
                 DetailedDiagnosticsStatus status = _diagnostics.GetStatus();
                 JsonNode? safeConfiguration = _diagnostics.SanitizeData(whitelistedConfiguration);
                 var runtimeSummary = new JsonObject
                 {
+                    ["logSchemaVersion"] = 2,
                     ["softwareVersion"] = typeof(DetailedDiagnosticsExportService).Assembly.GetName().Version?.ToString() ?? "unknown",
+                    ["processRunId"] = _diagnostics.ProcessRunId,
+                    ["installationCorrelation"] = _diagnostics.InstallationCorrelation,
                     ["windows"] = _diagnostics.SanitizeText(RuntimeInformation.OSDescription),
                     ["dotnet"] = _diagnostics.SanitizeText(RuntimeInformation.FrameworkDescription),
                     ["processArchitecture"] = RuntimeInformation.ProcessArchitecture.ToString(),
@@ -104,6 +126,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                     ["diagnosticMaximumBytes"] = status.MaximumBytes,
                     ["droppedEvents"] = status.DroppedEventCount,
                     ["capacityCleanupCount"] = status.CapacityCleanupCount,
+                    ["includedUpdaterLog"] = includedUpdater,
                     ["configuration"] = safeConfiguration
                 };
                 string runtimeSummaryText = runtimeSummary
@@ -113,7 +136,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                     Path.Combine(workspace, "runtime-summary.json"),
                     runtimeSummaryText,
                     new UTF8Encoding(false));
-                string summary = BuildReadableSummary(startUtc, endUtc, status, includedRegular);
+                string summary = BuildReadableSummary(startUtc, endUtc, status, includedRegular, includedUpdater);
                 File.WriteAllText(Path.Combine(workspace, "summary.txt"), summary, new UTF8Encoding(false));
 
                 ValidateWorkspace(workspace);
@@ -232,6 +255,50 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             return output.ToString();
         }
 
+        private static IEnumerable<string> EnumerateRegularLogFiles(string currentPath)
+        {
+            return EnumerateCurrentAndRotated(currentPath, 3);
+        }
+
+        private static IEnumerable<string> EnumerateCurrentAndRotated(string currentPath, int maximumRotation)
+        {
+            for (int index = maximumRotation; index >= 1; index--)
+            {
+                string rotated = currentPath + "." + index.ToString(global::System.Globalization.CultureInfo.InvariantCulture);
+                if (File.Exists(rotated))
+                    yield return rotated;
+            }
+            if (File.Exists(currentPath))
+                yield return currentPath;
+        }
+
+        private static string FilterJsonLines(string path, DateTime startUtc, DateTime endUtc)
+        {
+            if (!File.Exists(path))
+                return string.Empty;
+            var output = new StringBuilder();
+            foreach (string line in File.ReadLines(path, Encoding.UTF8))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+                try
+                {
+                    using JsonDocument document = JsonDocument.Parse(line);
+                    if (document.RootElement.TryGetProperty("timestampUtc", out JsonElement timestamp)
+                        && timestamp.TryGetDateTime(out DateTime value)
+                        && IsWithin(EnsureUtc(value), startUtc, endUtc))
+                    {
+                        output.AppendLine(line);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Ignore a partial final line from an updater process that is still writing.
+                }
+            }
+            return output.ToString();
+        }
+
         private static void AppendBlockIfInRange(
             StringBuilder output,
             IEnumerable<string> block,
@@ -266,7 +333,8 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             DateTime startUtc,
             DateTime endUtc,
             DetailedDiagnosticsStatus status,
-            bool includedRegular)
+            bool includedRegular,
+            bool includedUpdater)
         {
             return string.Join(
                 Environment.NewLine,
@@ -278,6 +346,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                 $"已丢弃低优先级事件：{status.DroppedEventCount}",
                 $"容量清理次数：{status.CapacityCleanupCount}",
                 $"包含同期常规错误日志：{(includedRegular ? "是" : "否")}",
+                $"包含同期更新器诊断日志：{(includedUpdater ? "是" : "否")}",
                 "",
                 "本诊断包由用户手动导出，软件不会自动上传或发送。",
                 "敏感字段已经脱敏；无法确认安全的正文子树不会保留。",

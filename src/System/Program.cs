@@ -174,6 +174,8 @@ namespace CS2TradeMonitor
                     string.Equals(arg, "--open-settings", StringComparison.OrdinalIgnoreCase));
                 var formStopwatch = Stopwatch.StartNew();
                 var mainForm = new MainForm(openSettingsOnStartup, startupSettingsPage);
+                if (SoftwareUpdateStartup.IsUpdateCompleted(args))
+                    PostForwardedStartupArgs(mainForm, args);
                 runtimeServices.SteamConnectivity.Start();
                 runtimeServices.NetworkRouteRecovery.Start();
                 commandBuffer.Attach(forwardedArgs =>
@@ -202,6 +204,7 @@ namespace CS2TradeMonitor
                 try
                 {
                     RuntimeHealthLogger.Stop();
+                    QuantResearchServiceProcessHost.Instance.Stop();
                     if (runtimeServices != null)
                     {
                         runtimeServices.NetworkRouteRecovery.StopAsync().GetAwaiter().GetResult();

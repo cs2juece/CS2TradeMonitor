@@ -20,7 +20,8 @@ namespace CS2TradeMonitor.UpdateSecurity
             "THIRD_PARTY_NOTICES.txt",
             "SteamDT_API_填写说明.txt",
             "docs/SteamDT_API_填写说明.txt",
-            "docs/使用说明(必读).txt"
+            "docs/使用说明(必读).txt",
+            "quant-web/data/sample.csv"
         };
 
         public static ProgramFileManifest LoadAndValidate(string sourceRoot)

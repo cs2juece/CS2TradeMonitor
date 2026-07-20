@@ -1,5 +1,6 @@
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core;
+using CS2TradeMonitor.src.Core.Lifecycle;
 using CS2TradeMonitor.Application;
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Notify;
@@ -55,6 +56,7 @@ namespace CS2TradeMonitor.Application.YouPin
         private readonly YouPinSaleReminderHistoryStore _historyStore;
         private readonly SemaphoreSlim _fetchLock = new(1, 1);
         private readonly SemaphoreSlim _sendOfferLock = new(1, 1);
+        private readonly PeriodicAsyncSingleFlight _periodicCheck = new();
         private readonly object _stateLock = new();
         private readonly string _historyPath = RuntimeDataPaths.GetDataFilePath("youpin_sale_reminder_history.json");
         private System.Threading.Timer? _timer;
@@ -123,8 +125,8 @@ namespace CS2TradeMonitor.Application.YouPin
                 return;
             }
 
-            _timer = new System.Threading.Timer(async _ => await CheckIfDueAsync(), null, 10000, 15000);
-            _ = CheckIfDueAsync();
+            _timer = new System.Threading.Timer(_ => _ = RunPeriodicCheckAsync(), null, 10000, 15000);
+            _ = RunPeriodicCheckAsync();
         }
 
         public YouPinSaleReminderState GetState()
@@ -992,6 +994,18 @@ namespace CS2TradeMonitor.Application.YouPin
                 order.SteamCounterpartyStatus = "未获取";
                 SaveHistory();
                 return order;
+            }
+        }
+
+        private async Task RunPeriodicCheckAsync()
+        {
+            try
+            {
+                await _periodicCheck.TryRunAsync(CheckIfDueAsync).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.Error("YouPinSaleReminder", "周期检查失败。", ex);
             }
         }
 

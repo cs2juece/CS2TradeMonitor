@@ -48,7 +48,8 @@ namespace CS2TradeMonitor.src.UI.Framework
                     item.VisibleInTaskbar,
                     item.RefreshIntervalSec,
                     item.DisplayFieldFlags,
-                    item.PriceAlertEnabled,
+                    item.PriceAlertDesktopEnabled,
+                    item.PriceAlertPhoneEnabled,
                     item.PriceAlertTriggerMode,
                     item.PriceAlertAbove.ToString("0.####", CultureInfo.InvariantCulture),
                     item.PriceAlertBelow.ToString("0.####", CultureInfo.InvariantCulture),
@@ -120,6 +121,9 @@ namespace CS2TradeMonitor.src.UI.Framework
                 MarketHashName = candidate.MarketHashName,
                 PlatformItemId = candidate.PlatformItemId,
                 PriceAlertEnabled = risePercent > 0 || fallPercent > 0,
+                PriceAlertDesktopEnabled = true,
+                PriceAlertPhoneEnabled = false,
+                PriceAlertDeliverySchemaVersion = ItemMonitorConfig.CurrentPriceAlertDeliverySchemaVersion,
                 PriceAlertTriggerMode = ItemPriceAlertTriggerMode.Percent,
                 PriceAlertRisePercent = risePercent,
                 PriceAlertFallPercent = fallPercent,
@@ -289,13 +293,13 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public static string BuildCompactConfigDetail(ItemMonitorConfig item)
         {
-            if (!item.PriceAlertEnabled)
-                return "提醒关闭";
-            if (item.VisibleInPanel)
-                return "桌面提醒";
-            if (item.VisibleInTaskbar)
-                return "任务栏提醒";
-            return "按初始值";
+            if (item.PriceAlertDesktopEnabled && item.PriceAlertPhoneEnabled)
+                return "电脑+手机提醒";
+            if (item.PriceAlertDesktopEnabled)
+                return "电脑提醒";
+            if (item.PriceAlertPhoneEnabled)
+                return "手机提醒";
+            return "提醒关闭";
         }
 
         public static ItemPriceAlertTriggerMode ResolveTriggerMode(ItemMonitorConfig item)

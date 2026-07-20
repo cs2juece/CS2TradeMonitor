@@ -63,10 +63,24 @@ namespace CS2TradeMonitor.src.UI.Framework
             int top = Math.Max(0, Height - UIUtils.S(38) - UIUtils.S(1));
             int left = 0;
             int gap = UIUtils.S(8);
+            int[] preferredWidths = _entries
+                .Select(entry => UIUtils.S(entry.Item.Width))
+                .ToArray();
+            int preferredTotal = preferredWidths.Sum() + gap * Math.Max(0, _entries.Count - 1);
+            if (preferredTotal > Width)
+                gap = Width >= _entries.Count + UIUtils.S(2) * Math.Max(0, _entries.Count - 1)
+                    ? UIUtils.S(2)
+                    : 0;
+            IReadOnlyList<int> widths = FrameworkTopTabLayoutModel.FitWidths(
+                preferredWidths,
+                Math.Max(1, Width),
+                gap,
+                UIUtils.S(48));
 
-            foreach (TabEntry entry in _entries)
+            for (int index = 0; index < _entries.Count; index++)
             {
-                int width = UIUtils.S(entry.Item.Width);
+                TabEntry entry = _entries[index];
+                int width = widths[index];
                 entry.Label.SetBounds(left, top, width, UIUtils.S(38));
                 left = entry.Label.Right + gap;
             }
@@ -113,7 +127,8 @@ namespace CS2TradeMonitor.src.UI.Framework
                 ForeColor = UIColors.TextSub,
                 AccessibleName = accessiblePrefix + "-" + item.Text,
                 AccessibleDescription = "切换到" + item.Text + "标签",
-                AccessibleRole = AccessibleRole.PushButton
+                AccessibleRole = AccessibleRole.PushButton,
+                AutoEllipsis = true
             };
 
             label.Click += (_, __) => TabSelected?.Invoke(item.Tab);
@@ -163,4 +178,50 @@ namespace CS2TradeMonitor.src.UI.Framework
     }
 
     internal sealed record FrameworkTopTabItem<TTab>(TTab Tab, string Text, int Width) where TTab : notnull;
+
+    internal static class FrameworkTopTabLayoutModel
+    {
+        public static IReadOnlyList<int> FitWidths(
+            IReadOnlyList<int> preferredWidths,
+            int availableWidth,
+            int gap,
+            int minimumWidth)
+        {
+            ArgumentNullException.ThrowIfNull(preferredWidths);
+            if (preferredWidths.Count == 0)
+                return Array.Empty<int>();
+
+            int count = preferredWidths.Count;
+            int usableWidth = Math.Max(count, availableWidth - Math.Max(0, gap) * (count - 1));
+            int minimum = Math.Max(1, minimumWidth);
+            int[] desired = preferredWidths.Select(width => Math.Max(minimum, width)).ToArray();
+            if (desired.Sum() <= usableWidth)
+                return desired;
+
+            if (usableWidth < minimum * count)
+            {
+                int compactWidth = usableWidth / count;
+                int remainder = usableWidth % count;
+                return Enumerable.Range(0, count)
+                    .Select(index => compactWidth + (index < remainder ? 1 : 0))
+                    .ToArray();
+            }
+
+            int distributable = usableWidth - minimum * count;
+            int desiredExtra = desired.Sum(width => width - minimum);
+            var result = new int[count];
+            int assignedExtra = 0;
+            for (int index = 0; index < count; index++)
+            {
+                int extra = index == count - 1
+                    ? distributable - assignedExtra
+                    : desiredExtra == 0
+                        ? 0
+                        : distributable * (desired[index] - minimum) / desiredExtra;
+                result[index] = minimum + extra;
+                assignedExtra += extra;
+            }
+            return result;
+        }
+    }
 }

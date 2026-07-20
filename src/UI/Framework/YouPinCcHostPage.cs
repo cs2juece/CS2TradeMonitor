@@ -7,7 +7,7 @@ using System.Windows.Forms;
 
 namespace CS2TradeMonitor.src.UI.Framework
 {
-    // 悠悠有品新主入口，承载新结构（库存涨跌 / 悠悠报价 / 包租公 / 设置）。
+    // 悠悠有品新主入口，承载新结构（库存涨跌 / 库存存取 / 悠悠报价 / 包租公 / 设置）。
     // 不改动「库存止盈/损」；旧 YouPinHostPage 入口已移除。
     public sealed class YouPinCcHostPage : SettingsPageBase, ISettingsSubRouteHost
     {
@@ -23,8 +23,10 @@ namespace CS2TradeMonitor.src.UI.Framework
         private YouPinCcMainTab _activeTab = YouPinCcMainTab.InventoryTrend;
         private YouPinCcMainTab? _pendingSubRouteTab;
         private YouPinInventoryTrendPage? _inventoryPage;
+        private YouPinInventoryStoragePage? _inventoryStoragePage;
         private YouPinSaleReminderPage? _quotePage;
         private YouPinAutoQuotePage? _autoQuotePage;
+        private YouPinGridPage? _gridPage;
         private YouPinCcSettingsPage? _settingsPage;
         private YouPinCcLandlordPage? _landlordPage;
 
@@ -39,6 +41,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             BackColor = UIColors.MainBg;
 
             _settingsTransaction = new SettingsTransaction(() => Config);
+            _settingsTransaction.Draft.DraftChanged += (_, __) => NotifySettingsChanged();
 
             _contentHost = new PageHost
             {
@@ -50,8 +53,10 @@ namespace CS2TradeMonitor.src.UI.Framework
                 new[]
                 {
                     new FrameworkTopTabItem<YouPinCcMainTab>(YouPinCcMainTab.InventoryTrend, "库存涨跌", 98),
+                    new FrameworkTopTabItem<YouPinCcMainTab>(YouPinCcMainTab.InventoryStorage, "库存存取", 98),
                     new FrameworkTopTabItem<YouPinCcMainTab>(YouPinCcMainTab.Quote, "悠悠报价", 98),
                     new FrameworkTopTabItem<YouPinCcMainTab>(YouPinCcMainTab.AutoQuote, "悠悠自动报价", 126),
+                    new FrameworkTopTabItem<YouPinCcMainTab>(YouPinCcMainTab.Grid, "交易网格", 98),
                     new FrameworkTopTabItem<YouPinCcMainTab>(YouPinCcMainTab.Landlord, "包租公", 82),
                     new FrameworkTopTabItem<YouPinCcMainTab>(YouPinCcMainTab.Settings, "设置", 82)
                 },
@@ -210,7 +215,9 @@ namespace CS2TradeMonitor.src.UI.Framework
                 YouPinCcMainTab.Quote => _quotePage ??= new YouPinSaleReminderPage(
                     _runtimeServices,
                     YouPinSaleReminderPageLayoutMode.QuoteOnlyCc),
+                YouPinCcMainTab.InventoryStorage => _inventoryStoragePage ??= new YouPinInventoryStoragePage(_runtimeServices),
                 YouPinCcMainTab.AutoQuote => _autoQuotePage ??= new YouPinAutoQuotePage(_runtimeServices),
+                YouPinCcMainTab.Grid => _gridPage ??= new YouPinGridPage(_runtimeServices),
                 YouPinCcMainTab.Landlord => _landlordPage ??= new YouPinCcLandlordPage(),
                 YouPinCcMainTab.Settings => _settingsPage ??= new YouPinCcSettingsPage(_runtimeServices),
                 _ => _inventoryPage ??= new YouPinInventoryTrendPage(_runtimeServices, showAuthControls: false)
@@ -280,8 +287,10 @@ namespace CS2TradeMonitor.src.UI.Framework
             if (disposing)
             {
                 DisposeUnhostedSubPage(_inventoryPage);
+                DisposeUnhostedSubPage(_inventoryStoragePage);
                 DisposeUnhostedSubPage(_quotePage);
                 DisposeUnhostedSubPage(_autoQuotePage);
+                DisposeUnhostedSubPage(_gridPage);
                 DisposeUnhostedSubPage(_landlordPage);
                 DisposeUnhostedSubPage(_settingsPage);
             }
@@ -305,8 +314,10 @@ namespace CS2TradeMonitor.src.UI.Framework
     internal enum YouPinCcMainTab
     {
         InventoryTrend,
+        InventoryStorage,
         Quote,
         AutoQuote,
+        Grid,
         Landlord,
         Settings
     }
@@ -358,6 +369,22 @@ namespace CS2TradeMonitor.src.UI.Framework
                 || key.Equals("Auto", StringComparison.OrdinalIgnoreCase))
             {
                 tab = YouPinCcMainTab.AutoQuote;
+                return true;
+            }
+
+            if (key.Equals("Grid", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("TradingGrid", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("YouPinGrid", StringComparison.OrdinalIgnoreCase))
+            {
+                tab = YouPinCcMainTab.Grid;
+                return true;
+            }
+
+            if (key.Equals("InventoryStorage", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("Storage", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("InventoryTransfer", StringComparison.OrdinalIgnoreCase))
+            {
+                tab = YouPinCcMainTab.InventoryStorage;
                 return true;
             }
 

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices; // [Added] For P/Invoke
 using System.Diagnostics; // [Added] For Process
-using System.Net.NetworkInformation; // [Added] For NetworkChange
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core;
 
@@ -32,16 +31,14 @@ namespace CS2TradeMonitor.src.SystemServices.InfoService
         private const string DEFAULT_IP = "0.0.0.0";
 
 
-        // Update Intervals (For IP/Host only, NOT for Uptime/Time)
-        private const int INTERVAL_SLOW = 60000; // 1 min (Stable state: IP found)
-        private const int INTERVAL_FAST = 2000;  // 2 sec (Retry state: IP missing)
+        // Host changes are rare; the one-minute check avoids work in the UI update loop.
+        private const int HOST_UPDATE_INTERVAL = 60000;
 
         // === State ===
         private readonly Dictionary<string, string> _data = new();
         private readonly object _lock = new();
 
         private long _lastUpdateTick = 0;
-        private int _currentInterval = INTERVAL_FAST;
 
         // [Optimization] Cache time strings to avoid allocs every tick
         private string _lastTimeStr = "";
@@ -68,13 +65,6 @@ namespace CS2TradeMonitor.src.SystemServices.InfoService
                 _data[KEY_TIME] = DateTime.Now.ToString("ddd HH:mm:ss"); // ★★★ 立即赋值当前时间，不再使用 00:00:00 默认值 ★★★
             }
 
-            // [Fix #287] 监听网络变更，立即触发IP刷新
-            NetworkChange.NetworkAddressChanged += (s, e) =>
-            {
-                _currentInterval = INTERVAL_FAST;
-                _lastUpdateTick = 0; // 强制下次 Update 立即执行
-            };
-
             // [Optimization] 异步执行耗时的进程检查，避免阻塞程序启动或触发杀软扫描导致UI卡顿
             Task.Run(() =>
             {
@@ -89,7 +79,7 @@ namespace CS2TradeMonitor.src.SystemServices.InfoService
             // (Initial value might be uncorrected for a few ms, which is acceptable)
             UpdateTimeInfo();
 
-            // Trigger first async update
+            // Trigger the first host update.
             UpdateData();
         }
 
@@ -176,8 +166,6 @@ namespace CS2TradeMonitor.src.SystemServices.InfoService
             if (string.IsNullOrEmpty(ip) || ip == DEFAULT_IP) return;
 
             SetData(KEY_IP, ip);
-            // If valid IP injected, switch to slow update immediately
-            _currentInterval = INTERVAL_SLOW;
         }
 
         public void RemoveDataByPrefix(string prefix)
@@ -201,9 +189,9 @@ namespace CS2TradeMonitor.src.SystemServices.InfoService
             // 1. High Frequency: Time (Every tick)
             UpdateTimeInfo();
 
-            // 2. Low Frequency: Network/Host (Based on interval)
+            // 2. Low Frequency: Host
             long now = Environment.TickCount64;
-            if (now - _lastUpdateTick > _currentInterval)
+            if (now - _lastUpdateTick > HOST_UPDATE_INTERVAL)
             {
                 _lastUpdateTick = now;
                 UpdateData();
@@ -268,37 +256,6 @@ namespace CS2TradeMonitor.src.SystemServices.InfoService
             if (GetValue(KEY_HOST) != currentHost)
             {
                 SetData(KEY_HOST, currentHost);
-            }
-
-            // IP info is potentially slow, run async
-            Task.Run(UpdateIPInfo);
-        }
-
-        private void UpdateIPInfo()
-        {
-            try
-            {
-                string? ip = null;
-
-                // Validate IP
-                if (!string.IsNullOrEmpty(ip) && ip != DEFAULT_IP)
-                {
-                    // [Optimization] Only update if changed
-                    if (GetValue(KEY_IP) != ip)
-                    {
-                        SetData(KEY_IP, ip);
-                    }
-                    _currentInterval = INTERVAL_SLOW; // Success -> Relax
-                }
-                else
-                {
-                    // Failed -> Retry fast
-                    _currentInterval = INTERVAL_FAST;
-                }
-            }
-            catch
-            {
-                _currentInterval = INTERVAL_FAST;
             }
         }
 

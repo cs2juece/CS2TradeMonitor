@@ -508,9 +508,15 @@ namespace CS2TradeMonitor.src.UI.Framework
 
                 cooldownCaption.SetBounds(rightColumn, UIUtils.S(154), UIUtils.S(88), UIUtils.S(30));
                 cooldown.SetBounds(rightColumn + UIUtils.S(92), UIUtils.S(158), UIUtils.S(42), UIUtils.S(22));
-                cooldownStart.SetBounds(cooldown.Right + UIUtils.S(12), UIUtils.S(152), UIUtils.S(76), UIUtils.S(32));
+                int cooldownStartLeft = cooldown.Right + UIUtils.S(12);
+                int cooldownSeparatorWidth = UIUtils.S(24);
+                int cooldownSeparatorGap = UIUtils.S(5);
+                int cooldownTimeWidth = Math.Min(
+                    UIUtils.S(76),
+                    Math.Max(UIUtils.S(44), (right - cooldownStartLeft - cooldownSeparatorWidth - cooldownSeparatorGap * 2) / 2));
+                cooldownStart.SetBounds(cooldownStartLeft, UIUtils.S(152), cooldownTimeWidth, UIUtils.S(32));
                 cooldownSeparator.SetBounds(cooldownStart.Right + UIUtils.S(5), UIUtils.S(154), UIUtils.S(24), UIUtils.S(30));
-                cooldownEnd.SetBounds(cooldownSeparator.Right + UIUtils.S(5), UIUtils.S(152), UIUtils.S(76), UIUtils.S(32));
+                cooldownEnd.SetBounds(cooldownSeparator.Right + cooldownSeparatorGap, UIUtils.S(152), cooldownTimeWidth, UIUtils.S(32));
                 lastChecked.SetBounds(rightColumn, UIUtils.S(202), Math.Max(1, right - rightColumn), UIUtils.S(28));
                 lastExecuted.SetBounds(rightColumn, UIUtils.S(232), Math.Max(1, right - rightColumn), UIUtils.S(28));
                 preference.SetBounds(rightColumn, UIUtils.S(262), Math.Max(1, right - rightColumn), UIUtils.S(28));
@@ -693,9 +699,15 @@ namespace CS2TradeMonitor.src.UI.Framework
 
                 cooldownCaption.SetBounds(rightColumn, UIUtils.S(196), UIUtils.S(88), UIUtils.S(30));
                 cooldown.SetBounds(rightColumn + UIUtils.S(92), UIUtils.S(200), UIUtils.S(42), UIUtils.S(22));
-                cooldownStart.SetBounds(cooldown.Right + UIUtils.S(12), UIUtils.S(194), UIUtils.S(76), UIUtils.S(32));
+                int cooldownStartLeft = cooldown.Right + UIUtils.S(12);
+                int cooldownSeparatorWidth = UIUtils.S(24);
+                int cooldownSeparatorGap = UIUtils.S(5);
+                int cooldownTimeWidth = Math.Min(
+                    UIUtils.S(76),
+                    Math.Max(UIUtils.S(44), (right - cooldownStartLeft - cooldownSeparatorWidth - cooldownSeparatorGap * 2) / 2));
+                cooldownStart.SetBounds(cooldownStartLeft, UIUtils.S(194), cooldownTimeWidth, UIUtils.S(32));
                 cooldownSeparator.SetBounds(cooldownStart.Right + UIUtils.S(5), UIUtils.S(196), UIUtils.S(24), UIUtils.S(30));
-                cooldownEnd.SetBounds(cooldownSeparator.Right + UIUtils.S(5), UIUtils.S(194), UIUtils.S(76), UIUtils.S(32));
+                cooldownEnd.SetBounds(cooldownSeparator.Right + cooldownSeparatorGap, UIUtils.S(194), cooldownTimeWidth, UIUtils.S(32));
                 lastChecked.SetBounds(rightColumn, UIUtils.S(232), Math.Max(1, right - rightColumn), UIUtils.S(28));
                 lastExecuted.SetBounds(rightColumn, UIUtils.S(260), Math.Max(1, right - rightColumn), UIUtils.S(28));
                 repeatProtection.SetBounds(rightColumn, UIUtils.S(286), Math.Max(1, right - rightColumn), UIUtils.S(28));

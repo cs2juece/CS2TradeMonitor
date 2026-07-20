@@ -15,6 +15,7 @@ namespace CS2TradeMonitor
         public bool TopMost { get; set; } = false;
         public bool AutoStart { get; set; } = true;
         public bool ShowMainWindowInTaskbar { get; set; } = false;
+        public bool AutoCheckSoftwareUpdates { get; set; } = true;
         public int RefreshMs { get; set; } = 1000;
         public double AnimationSpeed { get; set; } = 0.35;
         public Point Position { get; set; } = new Point(-1, -1);
@@ -115,7 +116,7 @@ namespace CS2TradeMonitor
         public static bool HasNoInteractiveEntry(Settings s)
         {
             return (s.HideMainForm || s.ClickThrough)
-                && !s.ShowTaskbar
+                && (!s.ShowTaskbar || s.TaskbarClickThrough)
                 && s.HideTrayIcon;
         }
 
@@ -124,7 +125,7 @@ namespace CS2TradeMonitor
         public string TaskbarMonitorDevice { get; set; } = "";
 
         // 任务栏行为配置
-        public bool TaskbarClickThrough { get; set; } = false; // 仅保留旧配置兼容；任务栏始终可交互。
+        public bool TaskbarClickThrough { get; set; } = false; // 开启后任务栏显示不接收鼠标输入。
         public bool TaskbarSingleLine { get; set; } = false;// 单行显示
         public bool TaskbarHoverShowAll { get; set; } = true; // [新增] 悬浮显示所有监控项
         public int TaskbarManualOffset { get; set; } = 0;// 手动偏移量 (像素)
@@ -474,7 +475,11 @@ namespace CS2TradeMonitor
         public bool HasChangeData { get; set; } = false;
 
         // 单品价格报警规则，数值为 0 表示该条件关闭。
+        // PriceAlertEnabled 仅用于旧版配置迁移；新界面以两个投递开关为准。
         public bool PriceAlertEnabled { get; set; } = false;
+        public bool PriceAlertDesktopEnabled { get; set; } = true;
+        public bool PriceAlertPhoneEnabled { get; set; } = false;
+        public int PriceAlertDeliverySchemaVersion { get; set; } = 0;
         public ItemPriceAlertTriggerMode PriceAlertTriggerMode { get; set; } = ItemPriceAlertTriggerMode.Auto;
         public double PriceAlertAbove { get; set; } = 0;
         public double PriceAlertBelow { get; set; } = 0;
@@ -486,6 +491,8 @@ namespace CS2TradeMonitor
         public long PriceAlertBaselineTime { get; set; } = 0;
         public long PriceAlertLastTriggerTime { get; set; } = 0;
         public string PriceAlertLastMessage { get; set; } = "";
+
+        public const int CurrentPriceAlertDeliverySchemaVersion = 1;
     }
 
     public enum ItemPriceAlertTriggerMode

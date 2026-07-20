@@ -15,6 +15,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             WriteIndented = false
         };
         private readonly object _sync = new();
+        private readonly object _bodySamplingSync = new();
         private readonly IClock _clock;
         private readonly DetailedDiagnosticsOptions _options;
         private readonly DetailedDiagnosticsStateStore _stateStore;
@@ -25,8 +26,12 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         private readonly CancellationTokenSource _writerCancellation = new();
         private readonly Task _writerTask;
         private readonly global::System.Threading.Timer _expiryTimer;
+        private readonly global::System.Threading.Timer _healthTimer;
         private readonly string _sessionsRoot;
         private readonly string _softwareVersion;
+        private readonly string _processRunId = Guid.NewGuid().ToString("N");
+        private readonly string? _installationCorrelation;
+        private readonly Dictionary<string, BodySampleState> _bodySamples = new(StringComparer.Ordinal);
         private DetailedDiagnosticsPersistedState _state = new();
         private bool _initialized;
         private bool _disposed;
@@ -36,6 +41,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         private long _reportedQueueDrops;
         private long _persistedQueueDrops;
         private int _enabledSnapshot;
+        private long _nextSequence;
 
         internal DetailedDiagnosticsService(
             IInstanceRuntimeContext instance,
@@ -55,6 +61,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                 instance.GetSecureFile("diagnostics-correlation-key.dat"),
                 instance.InstanceHash,
                 protector);
+            _installationCorrelation = _correlation.Correlate("installation", "CS2TradeMonitor");
             _redactor = new DetailedDiagnosticsRedactor(
                 _options.MaximumBodyBytes,
                 _correlation,
@@ -64,6 +71,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             _queue = new BoundedDiagnosticQueue(_options.QueueCapacity);
             _softwareVersion = ResolveSoftwareVersion();
             _expiryTimer = new global::System.Threading.Timer(_ => RefreshLifecycle(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            _healthTimer = new global::System.Threading.Timer(_ => RecordHealthSnapshot(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             _writerTask = Task.Run(WriterLoopAsync);
         }
 
@@ -106,7 +114,9 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                         new Dictionary<string, object?> { ["expiresAtUtc"] = _state.ExpiresAtUtc },
                         null,
                         DetailedDiagnosticPriority.Critical);
+                    EnqueueProcessStartedLocked("SessionResumed");
                     ScheduleExpiryLocked();
+                    ScheduleHealthSnapshotsLocked();
                 }
             }
         }
@@ -164,7 +174,9 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                     },
                     null,
                     DetailedDiagnosticPriority.Critical);
+                EnqueueProcessStartedLocked("DiagnosticsEnabled");
                 ScheduleExpiryLocked();
+                ScheduleHealthSnapshotsLocked();
                 return BuildStatusLocked(GetKnownTotalBytesLocked());
             }
         }
@@ -206,6 +218,47 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         internal DetailedDiagnosticBodyCapture CaptureBody(string? body, string? contentType)
             => _redactor.CaptureBody(body, contentType);
 
+        internal DetailedDiagnosticBodyCapture ApplySuccessfulResponseBodySampling(
+            string module,
+            string? routeFingerprint,
+            DetailedDiagnosticBodyCapture capture)
+        {
+            ArgumentNullException.ThrowIfNull(capture);
+            if (!capture.ParseSucceeded
+                || capture.Truncated
+                || capture.RedactedBody is null
+                || IsBusinessFailure(capture.RedactedBody))
+            {
+                return capture;
+            }
+
+            string schema = BuildSchemaSignature(capture.RedactedBody);
+            string key = (module ?? string.Empty) + "\u001f" + (routeFingerprint ?? string.Empty);
+            DateTime now = EnsureUtc(_clock.UtcNow);
+            lock (_bodySamplingSync)
+            {
+                if (!_bodySamples.TryGetValue(key, out BodySampleState? state)
+                    || !string.Equals(state.Schema, schema, StringComparison.Ordinal)
+                    || now - state.LastFullCaptureUtc >= _options.SuccessfulBodySampleInterval)
+                {
+                    _bodySamples[key] = new BodySampleState(now, schema);
+                    return capture;
+                }
+            }
+
+            return new DetailedDiagnosticBodyCapture
+            {
+                ContentType = capture.ContentType,
+                OriginalLengthBytes = capture.OriginalLengthBytes,
+                Sha256 = capture.Sha256,
+                ParseSucceeded = capture.ParseSucceeded,
+                Truncated = capture.Truncated,
+                SampledOut = true,
+                SampleReason = "RepeatedSuccessfulResponse",
+                FailureReason = capture.FailureReason
+            };
+        }
+
         internal string? Correlate(string category, string? value)
             => _correlation.Correlate(category, value);
 
@@ -213,6 +266,112 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
 
         internal JsonNode? SanitizeData(IReadOnlyDictionary<string, object?>? data)
             => _redactor.SanitizeEventData(data);
+
+        internal string ProcessRunId => _processRunId;
+
+        internal string? InstallationCorrelation => _installationCorrelation;
+
+        internal void RecordHealthSnapshot()
+        {
+            if (_disposed)
+                return;
+            lock (_sync)
+            {
+                RefreshLifecycleLocked();
+                if (!_state.IsEnabled)
+                    return;
+                long totalBytes = GetKnownTotalBytesLocked();
+                EnqueueLocked(
+                    "Information",
+                    "Diagnostics",
+                    "DiagnosticsHealth",
+                    new Dictionary<string, object?>
+                    {
+                        ["totalBytes"] = totalBytes,
+                        ["maximumBytes"] = _options.MaximumTotalBytes,
+                        ["remainingBytes"] = Math.Max(0, _options.MaximumTotalBytes - totalBytes),
+                        ["queuePending"] = _queue.PendingCount,
+                        ["queuePeakPending"] = _queue.PeakPendingCount,
+                        ["droppedNormal"] = _queue.DroppedNormalCount,
+                        ["droppedCritical"] = _queue.DroppedCriticalCount,
+                        ["successfulBodySampleIntervalMinutes"] = _options.SuccessfulBodySampleInterval.TotalMinutes
+                    },
+                    null,
+                    DetailedDiagnosticPriority.Normal);
+            }
+        }
+
+        private void EnqueueProcessStartedLocked(string reason)
+        {
+            EnqueueLocked(
+                "Information",
+                "Diagnostics",
+                "ProcessStarted",
+                new Dictionary<string, object?>
+                {
+                    ["reason"] = reason,
+                    ["processId"] = Environment.ProcessId
+                },
+                null,
+                DetailedDiagnosticPriority.Critical);
+        }
+
+        private static bool IsBusinessFailure(JsonNode node)
+        {
+            if (node is not JsonObject root)
+                return false;
+            if (root["success"] is JsonValue success
+                && success.TryGetValue<bool>(out bool succeeded)
+                && !succeeded)
+            {
+                return true;
+            }
+            return IsNonZeroCode(root["code"]) || IsNonZeroCode(root["errorCode"]);
+        }
+
+        private static bool IsNonZeroCode(JsonNode? node)
+        {
+            if (node is not JsonValue value)
+                return false;
+            if (value.TryGetValue<long>(out long numeric))
+                return numeric != 0;
+            return value.TryGetValue<string>(out string? text)
+                && !string.IsNullOrWhiteSpace(text)
+                && !string.Equals(text, "0", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(text, "ok", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(text, "success", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildSchemaSignature(JsonNode node)
+        {
+            var fields = new List<string>();
+            AppendSchema(node, "$", fields);
+            return string.Join('|', fields);
+        }
+
+        private static void AppendSchema(JsonNode? node, string path, ICollection<string> fields)
+        {
+            switch (node)
+            {
+                case JsonObject obj:
+                    foreach ((string name, JsonNode? value) in obj.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                        AppendSchema(value, path + "." + name, fields);
+                    break;
+                case JsonArray array:
+                    fields.Add(path + "[]");
+                    if (array.Count > 0)
+                        AppendSchema(array[0], path + "[]", fields);
+                    break;
+                case null:
+                    fields.Add(path + ":null");
+                    break;
+                default:
+                    fields.Add(path + ":value");
+                    break;
+            }
+        }
+
+        private sealed record BodySampleState(DateTime LastFullCaptureUtc, string Schema);
 
         public async Task FlushAsync(CancellationToken cancellationToken = default)
         {
@@ -263,6 +422,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             Shutdown();
             _disposed = true;
             _expiryTimer.Dispose();
+            _healthTimer.Dispose();
             _writerCancellation.Cancel();
             try
             {
@@ -408,11 +568,15 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         {
             var record = new JsonObject
             {
+                ["schemaVersion"] = 2,
                 ["timestampUtc"] = envelope.TimestampUtc,
+                ["sequence"] = envelope.Sequence,
                 ["level"] = _redactor.SanitizeText(envelope.Level),
                 ["module"] = _redactor.SanitizeText(envelope.Module),
                 ["event"] = _redactor.SanitizeText(envelope.EventName),
                 ["session"] = envelope.SessionId,
+                ["process"] = envelope.ProcessRunId,
+                ["installation"] = envelope.InstallationCorrelation,
                 ["correlation"] = string.IsNullOrWhiteSpace(envelope.Correlation)
                     ? null
                     : _redactor.SanitizeText(envelope.Correlation),
@@ -457,6 +621,9 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         {
             return new DetailedDiagnosticEnvelope(
                 sessionId,
+                _processRunId,
+                _installationCorrelation,
+                Interlocked.Increment(ref _nextSequence),
                 EnsureUtc(_clock.UtcNow),
                 _redactor.SanitizeText(level),
                 _redactor.SanitizeText(module),
@@ -495,6 +662,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             _state.ExpiresAtUtc = null;
             SaveStateLocked();
             _expiryTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            _healthTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
 
         private void RefreshLifecycleLocked(bool expireOnly = false)
@@ -534,6 +702,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             _state.ExpiresAtUtc = null;
             SaveStateLocked();
             _expiryTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            _healthTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
 
         private void ScheduleExpiryLocked()
@@ -546,6 +715,14 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             if (due > TimeSpan.FromDays(1))
                 due = TimeSpan.FromDays(1);
             _expiryTimer.Change(due, Timeout.InfiniteTimeSpan);
+        }
+
+        private void ScheduleHealthSnapshotsLocked()
+        {
+            TimeSpan interval = _options.HealthSnapshotInterval <= TimeSpan.Zero
+                ? TimeSpan.FromMinutes(5)
+                : _options.HealthSnapshotInterval;
+            _healthTimer.Change(interval, interval);
         }
 
         private DetailedDiagnosticsStatus BuildStatusLocked(long totalBytes)

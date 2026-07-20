@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CS2TradeMonitor.Application.Abstractions;
+using CS2TradeMonitor.Infrastructure.Diagnostics;
 using CS2TradeMonitor.Infrastructure.Paths;
 using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.UpdateSecurity;
@@ -49,32 +50,44 @@ namespace CS2TradeMonitor.src.SystemServices
 
         public async Task<SoftwareUpdateCheckResult> CheckAsync(CancellationToken cancellationToken = default)
         {
+            string operationId = Guid.NewGuid().ToString("N");
+            using IDisposable operationScope = DetailedDiagnosticOperationContext.Begin(operationId);
             await _checkLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 string currentVersion = GetCurrentVersion();
                 var manifestSources = SupportInfo.GetUpdateManifestSources();
+                DiagnosticsLogger.InfoEvent(
+                    Source,
+                    "UpdateCheckStarted",
+                    "Software update check started.",
+                    new Dictionary<string, object?>
+                    {
+                        ["operationId"] = operationId,
+                        ["currentVersion"] = currentVersion,
+                        ["sourceCount"] = manifestSources.Length
+                    });
                 if (manifestSources.Length == 0)
                 {
-                    return new SoftwareUpdateCheckResult
+                    return CompleteCheck(operationId, new SoftwareUpdateCheckResult
                     {
                         State = SoftwareUpdateState.Disabled,
                         CurrentVersion = currentVersion,
                         Message = "自动更新未启用：当前没有配置可用更新源，请从发布页手动获取新版。"
-                    };
+                    });
                 }
 
                 var manifestResult = await FetchManifestAsync(manifestSources, cancellationToken).ConfigureAwait(false);
                 if (manifestResult.Manifest == null)
                 {
-                    return new SoftwareUpdateCheckResult
+                    return CompleteCheck(operationId, new SoftwareUpdateCheckResult
                     {
                         State = SoftwareUpdateState.Failed,
                         CurrentVersion = currentVersion,
                         Message = manifestResult.Error,
                         ManifestUrl = manifestResult.ManifestUrl,
                         ManifestSourceName = manifestResult.SourceName
-                    };
+                    });
                 }
 
                 var manifest = manifestResult.Manifest;
@@ -85,7 +98,7 @@ namespace CS2TradeMonitor.src.SystemServices
                 if (!string.IsNullOrWhiteSpace(manifest.MinSupportedVersion)
                     && CompareVersions(currentVersion, manifest.MinSupportedVersion) < 0)
                 {
-                    return new SoftwareUpdateCheckResult
+                    return CompleteCheck(operationId, new SoftwareUpdateCheckResult
                     {
                         State = SoftwareUpdateState.Failed,
                         CurrentVersion = currentVersion,
@@ -93,12 +106,12 @@ namespace CS2TradeMonitor.src.SystemServices
                         ManifestUrl = manifestResult.ManifestUrl,
                         ManifestSourceName = manifestResult.SourceName,
                         Message = $"当前版本 v{currentVersion} 低于最低支持版本 v{manifest.MinSupportedVersion}，请手动下载安装。"
-                    };
+                    });
                 }
 
                 if (CompareVersions(manifest.Version, currentVersion) <= 0)
                 {
-                    return new SoftwareUpdateCheckResult
+                    return CompleteCheck(operationId, new SoftwareUpdateCheckResult
                     {
                         State = SoftwareUpdateState.Latest,
                         CurrentVersion = currentVersion,
@@ -107,13 +120,13 @@ namespace CS2TradeMonitor.src.SystemServices
                         ManifestUrl = manifestResult.ManifestUrl,
                         ManifestSourceName = manifestResult.SourceName,
                         Message = $"当前已是最新版本 v{currentVersion}。更新源：{manifestResult.SourceName}。"
-                    };
+                    });
                 }
 
                 var downloadSources = asset.GetDownloadSources();
                 if (downloadSources.Count == 0)
                 {
-                    return new SoftwareUpdateCheckResult
+                    return CompleteCheck(operationId, new SoftwareUpdateCheckResult
                     {
                         State = SoftwareUpdateState.Failed,
                         CurrentVersion = currentVersion,
@@ -122,12 +135,12 @@ namespace CS2TradeMonitor.src.SystemServices
                         ManifestUrl = manifestResult.ManifestUrl,
                         ManifestSourceName = manifestResult.SourceName,
                         Message = "发现新版本，但没有可用下载源。"
-                    };
+                    });
                 }
 
                 var firstDownload = downloadSources[0];
 
-                return new SoftwareUpdateCheckResult
+                return CompleteCheck(operationId, new SoftwareUpdateCheckResult
                 {
                     State = SoftwareUpdateState.Available,
                     CurrentVersion = currentVersion,
@@ -139,17 +152,30 @@ namespace CS2TradeMonitor.src.SystemServices
                     DownloadSourceName = firstDownload.DisplayName,
                     DownloadSources = downloadSources,
                     Message = $"发现新版本 v{manifest.Version}。更新源：{manifestResult.SourceName}。"
-                };
+                });
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Error(Source, "Checking software update failed.", ex);
-                return new SoftwareUpdateCheckResult
+                DiagnosticsLogger.ErrorEvent(
+                    Source,
+                    "UpdateCheckFailed",
+                    "Checking software update failed.",
+                    new Dictionary<string, object?>
+                    {
+                        ["operationId"] = operationId,
+                        ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                        ["hresult"] = ex.HResult,
+                        ["cancellationReason"] = ex is OperationCanceledException
+                            ? cancellationToken.IsCancellationRequested ? "CallerCancellation" : "Timeout"
+                            : null
+                    },
+                    ex);
+                return CompleteCheck(operationId, new SoftwareUpdateCheckResult
                 {
                     State = SoftwareUpdateState.Failed,
                     CurrentVersion = GetCurrentVersion(),
                     Message = "检查更新失败：" + GetFriendlyError(ex)
-                };
+                });
             }
             finally
             {
@@ -162,6 +188,8 @@ namespace CS2TradeMonitor.src.SystemServices
             IProgress<SoftwareUpdateProgress>? progress,
             CancellationToken cancellationToken = default)
         {
+            string operationId = Guid.NewGuid().ToString("N");
+            using IDisposable operationScope = DetailedDiagnosticOperationContext.Begin(operationId);
             if (!update.HasUpdate || update.Asset == null || update.Manifest == null)
                 throw new InvalidOperationException("没有可下载的更新。");
 
@@ -176,34 +204,100 @@ namespace CS2TradeMonitor.src.SystemServices
             if (downloadSources.Length == 0)
                 throw new InvalidOperationException("更新包下载地址为空。");
 
+            DiagnosticsLogger.InfoEvent(
+                Source,
+                "UpdateDownloadStarted",
+                "Software update download started.",
+                new Dictionary<string, object?>
+                {
+                    ["operationId"] = operationId,
+                    ["currentVersion"] = update.CurrentVersion,
+                    ["targetVersion"] = update.Manifest.Version,
+                    ["expectedBytes"] = update.Asset.SizeBytes,
+                    ["sourceCount"] = downloadSources.Length
+                });
+
             string updatesDir = RuntimeDataPaths.UpdatesDirectory;
             Directory.CreateDirectory(updatesDir);
 
             Exception? lastError = null;
-            foreach (var source in downloadSources)
+            for (int index = 0; index < downloadSources.Length; index++)
             {
+                SoftwareUpdateDownloadSource source = downloadSources[index];
                 string zipPath = GetUpdateZipPath(updatesDir, source.Url, update.Manifest.Version);
                 string tempPath = zipPath + ".download";
                 try
                 {
-                    return await DownloadFromSourceAsync(
+                    DiagnosticsLogger.InfoEvent(
+                        Source,
+                        "UpdateDownloadSourceStarted",
+                        "Software update source attempt started.",
+                        new Dictionary<string, object?>
+                        {
+                            ["operationId"] = operationId,
+                            ["sourceName"] = source.DisplayName,
+                            ["attempt"] = index + 1,
+                            ["maximumAttempts"] = downloadSources.Length
+                        });
+                    SoftwareUpdateDownloadResult result = await DownloadFromSourceAsync(
                         source,
                         update.Asset,
                         zipPath,
                         tempPath,
                         progress,
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken,
+                        operationId).ConfigureAwait(false);
+                    DiagnosticsLogger.InfoEvent(
+                        Source,
+                        "UpdateDownloadCompleted",
+                        "Software update download and validation completed.",
+                        new Dictionary<string, object?>
+                        {
+                            ["operationId"] = operationId,
+                            ["sourceName"] = source.DisplayName,
+                            ["sizeBytes"] = result.SizeBytes,
+                            ["sha256"] = result.Sha256,
+                            ["sizeValidated"] = result.SizeBytes == update.Asset.SizeBytes,
+                            ["sha256Validated"] = string.Equals(result.Sha256, update.Asset.Sha256, StringComparison.OrdinalIgnoreCase)
+                        });
+                    return result;
                 }
                 catch (OperationCanceledException)
                 {
                     CleanupFailedDownload(zipPath, tempPath);
+                    DiagnosticsLogger.WarningEvent(
+                        Source,
+                        "UpdateDownloadCancelled",
+                        "Software update download cancelled.",
+                        new Dictionary<string, object?>
+                        {
+                            ["operationId"] = operationId,
+                            ["sourceName"] = source.DisplayName,
+                            ["attempt"] = index + 1,
+                            ["cancellationReason"] = cancellationToken.IsCancellationRequested
+                                ? "CallerCancellation"
+                                : "Timeout"
+                        });
                     throw;
                 }
                 catch (Exception ex)
                 {
                     CleanupFailedDownload(zipPath, tempPath);
                     lastError = ex;
-                    DiagnosticsLogger.Info(Source, $"Download source failed: {source.DisplayName} -> {GetFriendlyError(ex)}");
+                    DiagnosticsLogger.WarningEvent(
+                        Source,
+                        "UpdateDownloadSourceFailed",
+                        $"Download source failed: {source.DisplayName} -> {GetFriendlyError(ex)}",
+                        new Dictionary<string, object?>
+                        {
+                            ["operationId"] = operationId,
+                            ["sourceName"] = source.DisplayName,
+                            ["attempt"] = index + 1,
+                            ["maximumAttempts"] = downloadSources.Length,
+                            ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                            ["hresult"] = ex.HResult,
+                            ["fallbackPlanned"] = index + 1 < downloadSources.Length
+                        });
                 }
             }
 
@@ -216,7 +310,8 @@ namespace CS2TradeMonitor.src.SystemServices
             string zipPath,
             string tempPath,
             IProgress<SoftwareUpdateProgress>? progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string transactionId)
         {
             if (File.Exists(tempPath))
                 File.Delete(tempPath);
@@ -294,6 +389,7 @@ namespace CS2TradeMonitor.src.SystemServices
 
             return new SoftwareUpdateDownloadResult
             {
+                TransactionId = transactionId,
                 ZipPath = zipPath,
                 SourceUrl = downloadSource.Url,
                 SizeBytes = new FileInfo(zipPath).Length,
@@ -340,6 +436,10 @@ namespace CS2TradeMonitor.src.SystemServices
 
         public void LaunchUpdater(SoftwareUpdateDownloadResult download)
         {
+            string operationId = string.IsNullOrWhiteSpace(download.TransactionId)
+                ? Guid.NewGuid().ToString("N")
+                : download.TransactionId;
+            using IDisposable operationScope = DetailedDiagnosticOperationContext.Begin(operationId);
             if (string.IsNullOrWhiteSpace(download.ZipPath) || !File.Exists(download.ZipPath))
                 throw new FileNotFoundException("更新包不存在。", download.ZipPath);
 
@@ -381,12 +481,61 @@ namespace CS2TradeMonitor.src.SystemServices
             startInfo.ArgumentList.Add(instance.InstanceHash);
             startInfo.ArgumentList.Add("--pid");
             startInfo.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--diagnostic-transaction-id");
+            startInfo.ArgumentList.Add(operationId);
             startInfo.ArgumentList.Add("--restart");
 
+            DiagnosticsLogger.InfoEvent(
+                Source,
+                "UpdateHandoffStarted",
+                "Updater launch handoff started.",
+                new Dictionary<string, object?>
+                {
+                    ["operationId"] = operationId,
+                    ["sizeBytes"] = download.SizeBytes,
+                    ["sha256"] = download.Sha256,
+                    ["restartRequested"] = true
+                });
             Process.Start(startInfo);
-            DiagnosticsLogger.Info(Source, "Updater launched.");
+            DiagnosticsLogger.InfoEvent(
+                Source,
+                "UpdateHandoffCompleted",
+                "Updater launched.",
+                new Dictionary<string, object?> { ["operationId"] = operationId });
             System.Windows.Forms.Application.Exit();
             Environment.Exit(0);
+        }
+
+        private static SoftwareUpdateCheckResult CompleteCheck(
+            string operationId,
+            SoftwareUpdateCheckResult result)
+        {
+            var data = new Dictionary<string, object?>
+            {
+                ["operationId"] = operationId,
+                ["state"] = result.State.ToString(),
+                ["currentVersion"] = result.CurrentVersion,
+                ["targetVersion"] = result.Manifest?.Version,
+                ["manifestSourceName"] = result.ManifestSourceName,
+                ["downloadSourceCount"] = result.DownloadSources.Count
+            };
+            if (result.State == SoftwareUpdateState.Failed)
+            {
+                DiagnosticsLogger.WarningEvent(
+                    Source,
+                    "UpdateCheckCompleted",
+                    "Software update check completed with failure.",
+                    data);
+            }
+            else
+            {
+                DiagnosticsLogger.InfoEvent(
+                    Source,
+                    "UpdateCheckCompleted",
+                    "Software update check completed.",
+                    data);
+            }
+            return result;
         }
 
         private async Task<(SoftwareUpdateManifest? Manifest, string ManifestUrl, string SourceName, string Error)> FetchManifestAsync(

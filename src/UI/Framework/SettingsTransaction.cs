@@ -38,7 +38,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         {
             Settings? settings = _settingsAccessor();
             if (settings is not null)
-                _adapter.Apply(settings);
+                _adapter.Apply(settings, Draft.ChangedKeys);
         }
     }
 }

@@ -26,5 +26,32 @@ namespace CS2TradeMonitor.Application.YouPin
             "/api/commodity/Inventory/SellInventoryWithLeaseV2";
         public const string LandlordGlobalReminderConfirm =
             "/api/youpin/safe/user/global/remind/data/push";
+        public const string GridSellMarket = "/api/homepage/v3/detail/commodity/list/sell";
+        public const string GridBatchBuyPrecheck =
+            "/api/youpin/bff/new/commodity/v1/inv/getUserCanPurInvQuantity";
+        public const string GridBatchBuyCreate =
+            "/api/youpin/bff/trade/v1/order/batch/sell/createBatchOrder";
+        public const string GridCashierList =
+            "/api/youpin/bff/payment/v1/cashier/query/list";
+        public const string GridPayConfirm =
+            "/api/youpin/bff/payment/v1/pay/order/confirm";
+        public const string GridPayStatus =
+            "/api/youpin/bff/payment/v1/pay/order/status";
+        public const string GridBatchBuyStatus =
+            "/api/youpin/bff/trade/v1/order/batch/sell/queryBatchOrderInfo";
+        public const string GridSaleOrderList =
+            "/api/youpin/bff/trade/sale/v1/sell/list";
+        public const string InventoryStorageAccessInfo =
+            "/api/youpin/commodity-agg/user/steam/inventory/storage/access/info";
+        public const string InventoryStorageStorableList =
+            "/api/youpin/commodity-agg/user/steam/inventory/storable/list";
+        public const string InventoryStorageList =
+            "/api/youpin/commodity-agg/user/steam/inventory/storage/list";
+        public const string InventoryStorageUnitItemList =
+            "/api/youpin/commodity-agg/user/steam/inventory/storage/unit/item/list";
+        public const string InventoryStorageAdd =
+            "/api/youpin/commodity-agg/user/steam/inventory/storage/add";
+        public const string InventoryStorageTakeOut =
+            "/api/youpin/commodity-agg/user/steam/inventory/storage/take/out";
     }
 }

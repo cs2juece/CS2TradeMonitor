@@ -46,6 +46,8 @@ namespace CS2TradeMonitor.Application.YouPin
         private readonly HttpClient _http;
         private readonly SemaphoreSlim _fetchLock = new(1, 1);
         private readonly object _stateLock = new();
+        private readonly object _timerLock = new();
+        private readonly Dictionary<string, TimeSpan> _backgroundRefreshConsumers = new(StringComparer.Ordinal);
         private readonly string _historyPath = RuntimeDataPaths.GetDataFilePath("youpin_inventory_history.json");
         private System.Threading.Timer? _timer;
         private Settings _settings = new();
@@ -78,8 +80,6 @@ namespace CS2TradeMonitor.Application.YouPin
         public void Configure(Settings settings)
         {
             _settings = settings ?? new Settings();
-            _timer?.Dispose();
-            _timer = null;
 
             if (!HasInventoryCredential())
             {
@@ -89,14 +89,91 @@ namespace CS2TradeMonitor.Application.YouPin
                 }
             }
 
-            if (!_settings.YouPinInventoryEnabled && !_settings.YouPinStopProfitLossEnabled)
+            bool shouldRefresh;
+            lock (_timerLock)
+            {
+                RestartTimerLocked();
+                shouldRefresh = ShouldRunTimerLocked();
+            }
+
+            if (!shouldRefresh)
             {
                 _lastStatus = "未启用";
                 return;
             }
 
-            _timer = new System.Threading.Timer(async _ => await FetchIfDueAsync(), null, 10000, 60000);
             _ = FetchIfDueAsync();
+        }
+
+        public void SetBackgroundRefreshConsumer(string consumerKey, TimeSpan? refreshInterval)
+        {
+            string key = (consumerKey ?? string.Empty).Trim();
+            if (key.Length == 0)
+                throw new ArgumentException("Background refresh consumer key is required.", nameof(consumerKey));
+
+            bool changed;
+            bool shouldRefresh;
+            lock (_timerLock)
+            {
+                if (refreshInterval is TimeSpan requested)
+                {
+                    TimeSpan normalized = TimeSpan.FromSeconds(Math.Clamp(requested.TotalSeconds, 60d, 3600d));
+                    changed = !_backgroundRefreshConsumers.TryGetValue(key, out TimeSpan existing)
+                        || existing != normalized;
+                    _backgroundRefreshConsumers[key] = normalized;
+                }
+                else
+                {
+                    changed = _backgroundRefreshConsumers.Remove(key);
+                }
+
+                if (changed)
+                    RestartTimerLocked();
+                shouldRefresh = changed && ShouldRunTimerLocked();
+            }
+
+            if (shouldRefresh)
+                _ = FetchIfDueAsync();
+        }
+
+        private void RestartTimerLocked()
+        {
+            _timer?.Dispose();
+            _timer = null;
+            if (!ShouldRunTimerLocked())
+                return;
+
+            _timer = new System.Threading.Timer(
+                async _ => await FetchIfDueAsync(),
+                null,
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromMinutes(1));
+        }
+
+        private bool ShouldRunTimerLocked()
+        {
+            return _settings.YouPinInventoryEnabled
+                || _settings.YouPinStopProfitLossEnabled
+                || _backgroundRefreshConsumers.Count > 0;
+        }
+
+        private int ResolveRefreshSecondsLocked()
+        {
+            int refreshSeconds = int.MaxValue;
+            if (_settings.YouPinInventoryEnabled || _settings.YouPinStopProfitLossEnabled)
+            {
+                refreshSeconds = Math.Min(
+                    refreshSeconds,
+                    Math.Max(300, _settings.YouPinInventoryRefreshSec <= 0
+                        ? 1800
+                        : _settings.YouPinInventoryRefreshSec));
+            }
+            if (_backgroundRefreshConsumers.Count > 0)
+            {
+                int consumerSeconds = (int)_backgroundRefreshConsumers.Values.Min(interval => interval.TotalSeconds);
+                refreshSeconds = Math.Min(refreshSeconds, Math.Max(60, consumerSeconds));
+            }
+            return refreshSeconds == int.MaxValue ? 1800 : refreshSeconds;
         }
 
         public YouPinInventoryState GetState()
@@ -206,10 +283,22 @@ namespace CS2TradeMonitor.Application.YouPin
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!_settings.YouPinInventoryEnabled && !_settings.YouPinStopProfitLossEnabled && !useMock && !force)
+                bool hasBackgroundConsumer;
+                int refreshSec;
+                lock (_timerLock)
+                {
+                    hasBackgroundConsumer = _backgroundRefreshConsumers.Count > 0;
+                    refreshSec = ResolveRefreshSecondsLocked();
+                }
+                if (!_settings.YouPinInventoryEnabled
+                    && !_settings.YouPinStopProfitLossEnabled
+                    && !hasBackgroundConsumer
+                    && !useMock
+                    && !force)
+                {
                     return YouPinInventoryFetchResult.Skip("未启用");
+                }
 
-                int refreshSec = Math.Max(300, _settings.YouPinInventoryRefreshSec <= 0 ? 1800 : _settings.YouPinInventoryRefreshSec);
                 if (!force && !useMock && DateTime.Now - _lastFetch < TimeSpan.FromSeconds(refreshSec))
                     return YouPinInventoryFetchResult.Skip("未到抓取时间");
 
@@ -697,7 +786,12 @@ namespace CS2TradeMonitor.Application.YouPin
 
         public void Dispose()
         {
-            _timer?.Dispose();
+            lock (_timerLock)
+            {
+                _timer?.Dispose();
+                _timer = null;
+                _backgroundRefreshConsumers.Clear();
+            }
             _http.Dispose();
             _fetchLock.Dispose();
         }

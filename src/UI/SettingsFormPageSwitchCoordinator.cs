@@ -168,7 +168,7 @@ namespace CS2TradeMonitor.src.UI
                 _setSwitchingPage(false);
                 _uiTickCoordinator.Resume();
 
-                if (UiJankProfiler.Enabled || stopwatch.ElapsedMilliseconds >= 300)
+                if (UiJankProfiler.VerboseLoggingEnabled || stopwatch.ElapsedMilliseconds >= 300)
                 {
                     DiagnosticsLogger.Info(
                         "Settings",

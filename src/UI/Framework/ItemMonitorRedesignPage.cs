@@ -36,6 +36,7 @@ namespace CS2TradeMonitor.src.UI.Framework
 
             _pageHost = new PageHost();
             _settingsTransaction = new SettingsTransaction(() => Config);
+            _settingsTransaction.Draft.DraftChanged += (_, __) => NotifySettingsChanged();
             _page = new ItemMonitorRedesignPage(runtimeServices);
             _steamDtItemService = runtimeServices.SteamDtItems;
             Controls.Add(_pageHost);
@@ -339,7 +340,13 @@ namespace CS2TradeMonitor.src.UI.Framework
             _searchCard.Controls.Add(_clearButton);
             _searchCard.Controls.Add(_candidateList);
 
-            _keywordInput.Inner.TextChanged += (_, __) => ScheduleCandidateSearch();
+            _keywordInput.Inner.TextChanged += (_, __) =>
+            {
+                if (!_keywordInput.IsImeComposing)
+                    ScheduleCandidateSearch();
+            };
+            _keywordInput.ImeCompositionStarted += (_, __) => PauseCandidateSearchForImeComposition();
+            _keywordInput.ImeCompositionEnded += (_, __) => ScheduleCandidateSearch();
             _keywordInput.Inner.KeyDown += (_, e) =>
             {
                 CandidateListKeyboardHelper.HandleKeyDown(
@@ -598,7 +605,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 {
                     if (child.Tag as string == "ConfigStrip")
                     {
-                        child.SetBounds(20, 76, width - 40, 72);
+                        child.SetBounds(20, 76, width - 40, 104);
                         child.PerformLayout();
                     }
                 }
@@ -647,7 +654,8 @@ namespace CS2TradeMonitor.src.UI.Framework
                 item.MarketHashName,
                 item.PlatformItemId,
                 item.HasChangeData,
-                item.PriceAlertEnabled,
+                item.PriceAlertDesktopEnabled,
+                item.PriceAlertPhoneEnabled,
                 mode,
                 item.PriceAlertAbove.ToString("R", CultureInfo.InvariantCulture),
                 item.PriceAlertBelow.ToString("R", CultureInfo.InvariantCulture),
@@ -668,16 +676,20 @@ namespace CS2TradeMonitor.src.UI.Framework
                 Padding = Padding.Empty,
                 Tag = "ConfigStrip"
             };
-            var reminderLabel = CreateLabel("提醒开关", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
-            var reminderCheck = CreateCompactCheck(item.PriceAlertEnabled);
-            var desktopLabel = CreateLabel("桌面", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
-            var desktopCheck = CreateCompactCheck(item.VisibleInPanel);
-            var taskbarLabel = CreateLabel("任务栏", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
-            var taskbarCheck = CreateCompactCheck(item.VisibleInTaskbar);
+            var desktopAlertLabel = CreateLabel("电脑提醒", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
+            var desktopAlertCheck = CreateCompactCheck(item.PriceAlertDesktopEnabled);
+            var phoneAlertLabel = CreateLabel("手机提醒", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
+            var phoneAlertCheck = CreateCompactCheck(item.PriceAlertPhoneEnabled);
+            var desktopDisplayLabel = CreateLabel("桌面显示", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
+            var desktopDisplayCheck = CreateCompactCheck(item.VisibleInPanel);
+            var taskbarDisplayLabel = CreateLabel("任务栏显示", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
+            var taskbarDisplayCheck = CreateCompactCheck(item.VisibleInTaskbar);
+            var refreshLabel = CreateLabel("刷新间隔", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
             var interval = CreateCompactNumberInput(item.RefreshIntervalSec.ToString(CultureInfo.InvariantCulture), "秒", 5);
             ItemPriceAlertTriggerMode mode = ItemMonitorPageModel.ResolveTriggerMode(item);
+            var modeLabel = CreateLabel("模式", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
             var percentMode = new LiteButton("百分比模式", false) { Width = 116, Height = 24, IsActive = mode == ItemPriceAlertTriggerMode.Percent };
-            var breakthroughMode = new LiteButton("突破模式", false) { Width = 88, Height = 24, IsActive = mode == ItemPriceAlertTriggerMode.Breakthrough };
+            var breakthroughMode = new LiteButton("价格模式", false) { Width = 88, Height = 24, IsActive = mode == ItemPriceAlertTriggerMode.Breakthrough };
             var restore = new LiteButton("恢复初始值", false) { Width = 116, Height = 26 };
             var save = new LiteButton("保存", true) { Width = 72, Height = 26 };
             percentMode.Font = UIFonts.Regular(8f);
@@ -700,7 +712,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             var modeHint = CreateLabel(
                 mode == ItemPriceAlertTriggerMode.Percent
                     ? "百分比模式：在单位时间内涨跌达到设定值时提醒"
-                    : "突破模式：价格高于或低于设定价时提醒",
+                    : "价格模式：价格高于或低于设定价时提醒",
                 UIFonts.Regular(8f),
                 UIColors.TextSub,
                 ContentAlignment.MiddleLeft);
@@ -722,9 +734,10 @@ namespace CS2TradeMonitor.src.UI.Framework
             {
                 SaveItemConfig(
                     item,
-                    reminderCheck.Checked,
-                    desktopCheck.Checked,
-                    taskbarCheck.Checked,
+                    desktopAlertCheck.Checked,
+                    phoneAlertCheck.Checked,
+                    desktopDisplayCheck.Checked,
+                    taskbarDisplayCheck.Checked,
                     interval,
                     firstInput,
                     secondInput,
@@ -734,15 +747,17 @@ namespace CS2TradeMonitor.src.UI.Framework
 
             strip.Controls.AddRange(new Control[]
             {
-                reminderLabel,
-                reminderCheck,
-                desktopLabel,
-                desktopCheck,
-                taskbarLabel,
-                taskbarCheck,
-                CreateLabel("刷新间隔", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft),
+                desktopAlertLabel,
+                desktopAlertCheck,
+                phoneAlertLabel,
+                phoneAlertCheck,
+                desktopDisplayLabel,
+                desktopDisplayCheck,
+                taskbarDisplayLabel,
+                taskbarDisplayCheck,
+                refreshLabel,
                 interval,
-                CreateLabel("模式", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft),
+                modeLabel,
                 percentMode,
                 breakthroughMode,
                 restore,
@@ -761,47 +776,38 @@ namespace CS2TradeMonitor.src.UI.Framework
                 int w = Math.Max(1, strip.ClientSize.Width);
                 int y1 = 8;
                 int y2 = 40;
-                bool narrow = w < 930;
+                int y3 = 72;
                 save.SetBounds(w - 88, y1 - 1, 72, 26);
                 restore.SetBounds(save.Left - 124, y1 - 1, 116, 26);
 
                 int x1 = 10;
-                reminderLabel.SetBounds(x1, y1 + 1, 78, 22);
-                reminderCheck.SetBounds(reminderLabel.Right + 2, y1, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
-                x1 = reminderCheck.Right + 6;
-                desktopLabel.SetBounds(x1, y1 + 1, 42, 22);
-                desktopCheck.SetBounds(desktopLabel.Right + 2, y1, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
-                x1 = desktopCheck.Right + 6;
-                taskbarLabel.SetBounds(x1, y1 + 1, 54, 22);
-                taskbarCheck.SetBounds(taskbarLabel.Right + 2, y1, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
-                x1 = taskbarCheck.Right + 8;
-                strip.Controls[6].SetBounds(x1, y1 + 1, 68, 22);
-                interval.SetBounds(strip.Controls[6].Right + 2, y1 - 1, 50, 26);
-                if (!narrow)
-                {
-                    x1 = interval.Right + 8;
-                    strip.Controls[8].SetBounds(x1, y1 + 1, 44, 22);
-                    percentMode.SetBounds(strip.Controls[8].Right + 2, y1, 116, 24);
-                    breakthroughMode.SetBounds(percentMode.Right + 4, y1, 88, 24);
+                desktopAlertLabel.SetBounds(x1, y1 + 1, 68, 22);
+                desktopAlertCheck.SetBounds(desktopAlertLabel.Right + 2, y1, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
+                x1 = desktopAlertCheck.Right + 8;
+                phoneAlertLabel.SetBounds(x1, y1 + 1, 68, 22);
+                phoneAlertCheck.SetBounds(phoneAlertLabel.Right + 2, y1, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
+                x1 = phoneAlertCheck.Right + 10;
+                refreshLabel.SetBounds(x1, y1 + 1, 68, 22);
+                interval.SetBounds(refreshLabel.Right + 2, y1 - 1, 50, 26);
 
-                    firstTitle.SetBounds(18, y2 + 1, ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth, 22);
-                    firstInput.SetBounds(firstTitle.Right + 4, y2 - 1, 58, 26);
-                }
-                else
-                {
-                    int x2 = 10;
-                    strip.Controls[8].SetBounds(x2, y2 + 1, 44, 22);
-                    percentMode.SetBounds(strip.Controls[8].Right + 2, y2, 116, 24);
-                    breakthroughMode.SetBounds(percentMode.Right + 4, y2, 88, 24);
-                    firstTitle.SetBounds(breakthroughMode.Right + 12, y2 + 1, ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth, 22);
-                    firstInput.SetBounds(firstTitle.Right + 4, y2 - 1, 58, 26);
-                }
+                int x2 = 10;
+                desktopDisplayLabel.SetBounds(x2, y2 + 1, 68, 22);
+                desktopDisplayCheck.SetBounds(desktopDisplayLabel.Right + 2, y2, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
+                x2 = desktopDisplayCheck.Right + 8;
+                taskbarDisplayLabel.SetBounds(x2, y2 + 1, ItemMonitorRedesignPageModel.ConfigStripTaskbarDisplayLabelWidth, 22);
+                taskbarDisplayCheck.SetBounds(taskbarDisplayLabel.Right + 2, y2, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
+                x2 = taskbarDisplayCheck.Right + 12;
+                modeLabel.SetBounds(x2, y2 + 1, 44, 22);
+                percentMode.SetBounds(modeLabel.Right + 2, y2, 116, 24);
+                breakthroughMode.SetBounds(percentMode.Right + 4, y2, 88, 24);
 
-                secondTitle.SetBounds(firstInput.Right + 12, y2 + 1, ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth, 22);
-                secondInput.SetBounds(secondTitle.Right + 4, y2 - 1, 58, 26);
-                unitTitle.SetBounds(secondInput.Right + 12, y2 + 1, 68, 22);
-                unitTime.SetBounds(unitTitle.Right + 4, y2 - 1, 52, 26);
-                modeHint.SetBounds(unitTime.Right + 14, y2 + 1, Math.Max(140, w - unitTime.Right - 34), 22);
+                firstTitle.SetBounds(18, y3 + 1, ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth, 22);
+                firstInput.SetBounds(firstTitle.Right + 4, y3 - 1, 58, 26);
+                secondTitle.SetBounds(firstInput.Right + 12, y3 + 1, ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth, 22);
+                secondInput.SetBounds(secondTitle.Right + 4, y3 - 1, 58, 26);
+                unitTitle.SetBounds(secondInput.Right + 12, y3 + 1, 68, 22);
+                unitTime.SetBounds(unitTitle.Right + 4, y3 - 1, 52, 26);
+                modeHint.SetBounds(unitTime.Right + 14, y3 + 1, Math.Max(140, w - unitTime.Right - 34), 22);
             };
             row.Controls.Add(strip);
         }
@@ -821,7 +827,10 @@ namespace CS2TradeMonitor.src.UI.Framework
             double defaultFall = GetDouble(nameof(Settings.DefaultItemPriceAlertFallPercent), 0);
             int defaultWindow = ItemMonitorListCardModel.NormalizeDefaultWindowMinutes((int)Math.Round(GetDouble(nameof(Settings.DefaultItemPriceAlertWindowMinutes), 10)));
 
-            item.PriceAlertEnabled = defaultRise > 0 || defaultFall > 0;
+            item.PriceAlertDesktopEnabled = true;
+            item.PriceAlertPhoneEnabled = false;
+            item.PriceAlertDeliverySchemaVersion = ItemMonitorConfig.CurrentPriceAlertDeliverySchemaVersion;
+            item.PriceAlertEnabled = true;
             item.VisibleInPanel = _settingsStore?.Get(nameof(Settings.ItemMonitorDefaultVisibleInPanel), false) ?? false;
             item.VisibleInTaskbar = _settingsStore?.Get(nameof(Settings.ItemMonitorDefaultVisibleInTaskbar), false) ?? false;
             item.RefreshIntervalSec = defaultInterval;
@@ -839,7 +848,8 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         private void SaveItemConfig(
             ItemMonitorConfig item,
-            bool alertEnabled,
+            bool desktopAlertEnabled,
+            bool phoneAlertEnabled,
             bool visibleInPanel,
             bool visibleInTaskbar,
             LiteNumberInput interval,
@@ -848,7 +858,10 @@ namespace CS2TradeMonitor.src.UI.Framework
             LiteNumberInput unitTime,
             ItemPriceAlertTriggerMode mode)
         {
-            item.PriceAlertEnabled = alertEnabled;
+            item.PriceAlertDesktopEnabled = desktopAlertEnabled;
+            item.PriceAlertPhoneEnabled = phoneAlertEnabled;
+            item.PriceAlertDeliverySchemaVersion = ItemMonitorConfig.CurrentPriceAlertDeliverySchemaVersion;
+            item.PriceAlertEnabled = desktopAlertEnabled || phoneAlertEnabled;
             item.VisibleInPanel = visibleInPanel;
             item.VisibleInTaskbar = visibleInTaskbar;
             item.RefreshIntervalSec = ItemMonitorPageModel.NormalizeItemRefreshInterval(interval.ValueInt, GetDefaultItemRefreshIntervalSec());
@@ -938,6 +951,15 @@ namespace CS2TradeMonitor.src.UI.Framework
             _searchDebounceTimer.Stop();
             _searchDebounceTimer.Start();
             LayoutSearchCard();
+        }
+
+        private void PauseCandidateSearchForImeComposition()
+        {
+            if (_disposed || IsDisposed)
+                return;
+
+            _searchDebounceTimer.Stop();
+            ClearCandidateDropdown(clearText: false);
         }
 
         private async void OnSearchDebounceTick(object? sender, EventArgs e)
@@ -1067,7 +1089,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         {
             try
             {
-                bool ok = await _steamDtItemService.FetchItemPriceAsync(item, persistSettings: false);
+                bool ok = await _steamDtItemService.FetchItemPriceAsync(item);
                 if (PageToken.IsCancellationRequested || _disposed || IsDisposed)
                     return;
 
@@ -1114,7 +1136,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 {
                     if (PageToken.IsCancellationRequested || _disposed || IsDisposed)
                         return;
-                    await _steamDtItemService.FetchItemPriceAsync(item, persistSettings: false);
+                    await _steamDtItemService.FetchItemPriceAsync(item);
                 }
                 CommitItemConfigs(forceChanged: true, flushDraft: true);
                 RefreshFromStore();
@@ -1137,7 +1159,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             button.Enabled = false;
             try
             {
-                bool ok = await _steamDtItemService.FetchItemPriceAsync(item, persistSettings: false);
+                bool ok = await _steamDtItemService.FetchItemPriceAsync(item);
                 CommitItemConfigs(forceChanged: true, flushDraft: true);
                 RefreshFromStore();
                 SetStatus(ok ? "已刷新：" + item.Name : "刷新失败：" + item.LastStatus, warn: !ok);
@@ -1354,7 +1376,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         public const int ListCardHeight = 645;
         public const int InitialVisibleItemRows = 12;
         public const int CollapsedItemRowHeight = 58;
-        public const int ExpandedItemRowHeight = 156;
+        public const int ExpandedItemRowHeight = 188;
         public const int RuleStepperMinTileWidth = 148;
         public const int RuleStepperMaxTileWidth = 168;
         public const int RuleStepperMinGap = 8;
@@ -1362,6 +1384,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         public const int RuleStepperHeight = 40;
         public const int ConfigStripValueLabelWidth = 54;
         public const int ConfigStripCheckWidth = 26;
+        public const int ConfigStripTaskbarDisplayLabelWidth = 88;
 
         public static int GetVisibleItemRowCount(int totalCount, bool showAll)
         {

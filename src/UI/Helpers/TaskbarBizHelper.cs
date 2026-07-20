@@ -70,7 +70,7 @@ namespace CS2TradeMonitor.src.UI.Helpers
             }
             catch { _transparentKey = isLight ? Color.FromArgb(210, 210, 211) : Color.FromArgb(40, 40, 41); }
 
-            _winHelper.ApplyLayeredStyle(_transparentKey, clickThrough: false);
+            _winHelper.ApplyLayeredStyle(_transparentKey, _cfg.TaskbarClickThrough);
             return true;
         }
 

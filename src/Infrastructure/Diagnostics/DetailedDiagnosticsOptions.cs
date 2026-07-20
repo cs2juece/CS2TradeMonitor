@@ -9,5 +9,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         public long MaximumTotalBytes { get; init; } = 200L * 1024 * 1024;
         public int MaximumBodyBytes { get; init; } = 5 * 1024 * 1024;
         public int QueueCapacity { get; init; } = 4096;
+        public TimeSpan SuccessfulBodySampleInterval { get; init; } = TimeSpan.FromMinutes(5);
+        public TimeSpan HealthSnapshotInterval { get; init; } = TimeSpan.FromMinutes(5);
     }
 }

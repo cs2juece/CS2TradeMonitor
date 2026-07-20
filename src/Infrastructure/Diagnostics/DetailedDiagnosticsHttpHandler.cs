@@ -27,21 +27,33 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             if (service?.IsEnabledFast != true)
                 return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
+            string operationId = Guid.NewGuid().ToString("N");
+            string? parentOperationId = DetailedDiagnosticOperationContext.CurrentOperationId;
             var stopwatch = Stopwatch.StartNew();
             DetailedDiagnosticBodyCapture? requestBody = await TryCaptureRequestBodyAsync(service, request, cancellationToken)
                 .ConfigureAwait(false);
-            var requestData = BuildRequestData(request);
+            var requestData = BuildRequestData(service, request, operationId, parentOperationId);
             if (requestBody is not null)
                 requestData["requestBody"] = requestBody;
-            service.Record("Information", _module, "HttpRequestStarted", requestData);
+            service.Record("Information", _module, "HttpRequestStarted", requestData, operationId);
 
             try
             {
                 HttpResponseMessage response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
                 DetailedDiagnosticBodyCapture? responseBody = await TryCaptureResponseBodyAsync(service, response, cancellationToken)
                     .ConfigureAwait(false);
+                string? routeFingerprint = service.Correlate(
+                    "httpRoute",
+                    request.RequestUri?.AbsolutePath ?? string.Empty);
+                if (response.IsSuccessStatusCode && responseBody is not null)
+                {
+                    responseBody = service.ApplySuccessfulResponseBodySampling(
+                        _module,
+                        routeFingerprint,
+                        responseBody);
+                }
                 stopwatch.Stop();
-                var responseData = BuildRequestData(request);
+                var responseData = BuildRequestData(service, request, operationId, parentOperationId);
                 responseData["statusCode"] = (int)response.StatusCode;
                 responseData["succeeded"] = response.IsSuccessStatusCode;
                 responseData["elapsedMs"] = stopwatch.Elapsed.TotalMilliseconds;
@@ -52,6 +64,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                     _module,
                     "HttpRequestCompleted",
                     responseData,
+                    operationId,
                     priority: response.IsSuccessStatusCode
                         ? DetailedDiagnosticPriority.Normal
                         : DetailedDiagnosticPriority.Critical);
@@ -60,27 +73,46 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                var failureData = BuildRequestData(request);
+                var failureData = BuildRequestData(service, request, operationId, parentOperationId);
                 failureData["elapsedMs"] = stopwatch.Elapsed.TotalMilliseconds;
                 failureData["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
                 failureData["message"] = ex.Message;
+                failureData["hresult"] = ex.HResult;
+                if (ex is OperationCanceledException)
+                {
+                    failureData["cancellationReason"] = cancellationToken.IsCancellationRequested
+                        ? "CallerCancellation"
+                        : "TimeoutOrTransportCancellation";
+                }
                 service.Record(
                     "Error",
                     _module,
                     "HttpRequestFailed",
                     failureData,
+                    operationId,
                     priority: DetailedDiagnosticPriority.Critical);
                 throw;
             }
         }
 
-        private static Dictionary<string, object?> BuildRequestData(HttpRequestMessage request)
+        private Dictionary<string, object?> BuildRequestData(
+            DetailedDiagnosticsService service,
+            HttpRequestMessage request,
+            string operationId,
+            string? parentOperationId)
         {
+            string absolutePath = request.RequestUri?.AbsolutePath ?? string.Empty;
             return new Dictionary<string, object?>
             {
+                ["operationId"] = operationId,
+                ["parentOperationId"] = parentOperationId,
+                ["provider"] = _module,
+                ["operationName"] = _module + "." + request.Method.Method,
                 ["method"] = request.Method.Method,
                 ["scheme"] = request.RequestUri?.Scheme ?? "",
                 ["host"] = request.RequestUri?.Host ?? "",
+                ["routeFingerprint"] = service.Correlate("httpRoute", absolutePath),
+                ["pathSegmentCount"] = absolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Length,
                 ["contentType"] = request.Content?.Headers.ContentType?.MediaType ?? ""
             };
         }

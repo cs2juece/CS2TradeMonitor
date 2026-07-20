@@ -50,6 +50,8 @@ logs/
 
 # Runtime user data
 data/
+!CS2QuantWeb/data/
+!CS2QuantWeb/data/sample.csv
 history/
 runtime/
 

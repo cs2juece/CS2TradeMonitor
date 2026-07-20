@@ -118,7 +118,9 @@ namespace CS2TradeMonitor.Application.YouPin
         decimal NormalChargePercent = 0m,
         decimal VipChargePercent = 0m,
         int VipSwitchStatus = 0,
-        string MarketHashName = "");
+        string MarketHashName = "",
+        bool IsSaleEligible = false,
+        string SaleEligibilityReason = "");
 
     internal sealed record YouPinLandlordInventoryListCommand(
         string AssetId,
@@ -130,7 +132,9 @@ namespace CS2TradeMonitor.Application.YouPin
         int CompensationType,
         decimal NormalChargePercent,
         decimal VipChargePercent,
-        int VipSwitchStatus);
+        int VipSwitchStatus,
+        bool IsCanLease = true,
+        bool IsCanSold = false);
 
     internal sealed record YouPinLandlordInventoryWriteResult(
         bool Success,

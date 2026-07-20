@@ -47,10 +47,10 @@ namespace CS2TradeMonitor.src.Core
             if (HasGitHubUpdateManifestSource
                 && TryGetGitHubRepo(out string owner, out string repo))
             {
-                sources.Add(new UpdateManifestSource("GitHub 官方",
-                    SupportUrls.GitHubLatestDownload(owner, repo, "latest.json")));
-                sources.Add(new UpdateManifestSource("GitHub 官方兼容",
-                    SupportUrls.GitHubLatestDownload(owner, repo, "version.json")));
+                AddSource(sources, "GitHub 官方", SupportUrls.GitHubLatestJson);
+                AddSource(sources, "GitHub 官方兼容", SupportUrls.GitHubVersionJson);
+                AddSource(sources, "GitHub 过渡兼容",
+                    SupportUrls.GitHubLatestDownload(owner, repo, "latest.json"));
             }
 
             AddSource(sources, "Cloudflare 备用", CloudflareLatestJsonUrl);

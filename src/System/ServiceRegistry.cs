@@ -6,6 +6,7 @@ using CS2TradeMonitor.Application.Market;
 using CS2TradeMonitor.Application.Notify;
 using CS2TradeMonitor.Infrastructure.Configuration;
 using CS2TradeMonitor.Infrastructure.Diagnostics;
+using CS2TradeMonitor.Infrastructure.YouPin;
 using CS2TradeMonitor.Infrastructure.Http;
 using CS2TradeMonitor.Infrastructure.Paths;
 using CS2TradeMonitor.Infrastructure.Security;
@@ -113,10 +114,32 @@ namespace CS2TradeMonitor.src.SystemServices
             services.AddSingleton<IYouPinAuthService>(_ => YouPinAuthService.Instance);
             services.AddSingleton(_ => YouPinInventoryService.Instance);
             services.AddSingleton<IYouPinInventoryService>(_ => YouPinInventoryService.Instance);
+            services.AddSingleton<YouPinInventoryStorageHttpAdapter>();
+            services.AddSingleton<IYouPinInventoryStorageAdapter>(provider =>
+                provider.GetRequiredService<YouPinInventoryStorageHttpAdapter>());
+            services.AddSingleton<YouPinInventoryStorageService>();
+            services.AddSingleton<IYouPinInventoryStorageService>(provider =>
+                provider.GetRequiredService<YouPinInventoryStorageService>());
             services.AddSingleton(_ => YouPinProfitLossService.Instance);
             services.AddSingleton<IYouPinProfitLossService>(_ => YouPinProfitLossService.Instance);
             services.AddSingleton(_ => YouPinSaleReminderService.Instance);
             services.AddSingleton<IYouPinSaleReminderService>(_ => YouPinSaleReminderService.Instance);
+            services.AddSingleton<YouPinGridStrategyFileStore>();
+            services.AddSingleton<IYouPinGridStrategyStore>(provider =>
+                provider.GetRequiredService<YouPinGridStrategyFileStore>());
+            services.AddSingleton<YouPinGridMarketGateway>();
+            services.AddSingleton<IYouPinGridMarketGateway>(provider =>
+                provider.GetRequiredService<YouPinGridMarketGateway>());
+            services.AddSingleton<YouPinGridExecutionJournalFileStore>();
+            services.AddSingleton<IYouPinGridExecutionJournal>(provider =>
+                provider.GetRequiredService<YouPinGridExecutionJournalFileStore>());
+            services.AddSingleton<YouPinGridExecutionGateway>();
+            services.AddSingleton<IYouPinGridExecutionGateway>(provider =>
+                provider.GetRequiredService<YouPinGridExecutionGateway>());
+            services.AddSingleton<YouPinGridExecutionModule>();
+            services.AddSingleton<YouPinGridTradingService>();
+            services.AddSingleton<IYouPinGridTradingService>(provider =>
+                provider.GetRequiredService<YouPinGridTradingService>());
             services.AddSingleton<YouPinLandlordGateway>();
             services.AddSingleton<IYouPinLandlordGateway>(provider =>
                 provider.GetRequiredService<YouPinLandlordGateway>());

@@ -35,6 +35,7 @@ namespace CS2TradeMonitor.src.UI.Framework
 
             _pageHost = new PageHost();
             _settingsTransaction = new SettingsTransaction(() => Config);
+            _settingsTransaction.Draft.DraftChanged += (_, __) => NotifySettingsChanged();
             _systemSettingsPage = new SystemSettingsPage(runtimeServices);
 
             Controls.Add(_pageHost);
@@ -265,13 +266,26 @@ namespace CS2TradeMonitor.src.UI.Framework
 
             using (UiJankProfiler.Measure("SystemPage.BuildGroup", "Update", thresholdMs: 1))
             {
-                var section = CreateSection("软件更新", UIUtils.S(44));
-                var row = new SystemSettingsUpdateRow(GetDisplayVersion(), CheckSoftwareUpdate, OpenGitHubPage)
-                {
-                    Dock = DockStyle.Fill
-                };
+                var section = CreateSection("软件更新", UIUtils.S(120));
+                var row = new SystemSettingsUpdateRow(GetDisplayVersion(), CheckSoftwareUpdate, OpenGitHubPage);
+                var automaticCheck = CreateToggleRow(
+                    "自动检查更新",
+                    "启动后自动检查，之后每 3 小时检查一次；关闭后仍可手动检查。",
+                    nameof(Settings.AutoCheckSoftwareUpdates),
+                    fallback: true);
                 _softwareUpdateStatusHint = row.StatusLabel;
                 section.Body.Controls.Add(row);
+                section.Body.Controls.Add(automaticCheck);
+                section.Body.Layout += (_, __) =>
+                {
+                    int updateRowHeight = UIUtils.S(44);
+                    row.SetBounds(0, 0, section.Body.Width, updateRowHeight);
+                    automaticCheck.SetBounds(
+                        0,
+                        updateRowHeight,
+                        section.Body.Width,
+                        Math.Max(1, section.Body.Height - updateRowHeight));
+                };
             }
 
             using (UiJankProfiler.Measure("SystemPage.BuildGroup", "Diagnostics", thresholdMs: 1))
@@ -766,6 +780,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 var configuration = new Dictionary<string, object?>
                 {
                     ["autoStart"] = Get(nameof(Settings.AutoStart), false),
+                    ["autoCheckSoftwareUpdates"] = Get(nameof(Settings.AutoCheckSoftwareUpdates), true),
                     ["showTaskbarButton"] = Get(nameof(Settings.ShowMainWindowInTaskbar), false),
                     ["hideTrayIcon"] = Get(nameof(Settings.HideTrayIcon), false),
                     ["settingsDarkMode"] = Get(nameof(Settings.SettingsPanelDarkMode), true),

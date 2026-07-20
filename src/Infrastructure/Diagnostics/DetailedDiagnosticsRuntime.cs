@@ -46,6 +46,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
             DetailedDiagnosticsService? service = Volatile.Read(ref _service);
             if (service is null)
                 return;
+            correlation ??= DetailedDiagnosticOperationContext.CurrentOperationId;
             service.Record(level, module, eventName, data, correlation, priority);
         }
 

@@ -9,17 +9,21 @@ namespace CS2TradeMonitor
     {
         private MainFormRuntimeServices(
             IRenderScheduler renderScheduler,
+            ISoftwareUpdateService softwareUpdates,
             IYouPinInventoryService youPinInventory,
             IYouPinSaleReminderService youPinSaleReminders,
             IYouPinLandlordAutomation youPinLandlordAutomation)
         {
             RenderScheduler = renderScheduler ?? throw new ArgumentNullException(nameof(renderScheduler));
+            SoftwareUpdates = softwareUpdates ?? throw new ArgumentNullException(nameof(softwareUpdates));
             YouPinInventory = youPinInventory ?? throw new ArgumentNullException(nameof(youPinInventory));
             YouPinSaleReminders = youPinSaleReminders ?? throw new ArgumentNullException(nameof(youPinSaleReminders));
             YouPinLandlordAutomation = youPinLandlordAutomation ?? throw new ArgumentNullException(nameof(youPinLandlordAutomation));
         }
 
         public IRenderScheduler RenderScheduler { get; }
+
+        public ISoftwareUpdateService SoftwareUpdates { get; }
 
         public IYouPinInventoryService YouPinInventory { get; }
 
@@ -38,6 +42,7 @@ namespace CS2TradeMonitor
 
             return new MainFormRuntimeServices(
                 provider.GetRequiredService<IRenderScheduler>(),
+                provider.GetRequiredService<ISoftwareUpdateService>(),
                 provider.GetRequiredService<IYouPinInventoryService>(),
                 provider.GetRequiredService<IYouPinSaleReminderService>(),
                 provider.GetRequiredService<IYouPinLandlordAutomation>());

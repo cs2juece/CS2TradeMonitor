@@ -3,6 +3,65 @@
 #include <windows.h>
 #include <winhttp.h>
 
+namespace
+{
+    constexpr wchar_t AuthorNoteStateValueName[] = L"AuthorNoteShown";
+
+    std::wstring GetLegacyAuthorNoteFlagPath(const std::wstring& installRoot)
+    {
+        return installRoot + L"\\user-data\\data\\author-note-shown.flag";
+    }
+
+    bool HasLegacyAuthorNoteFlag(const std::wstring& installRoot)
+    {
+        const std::wstring path = GetLegacyAuthorNoteFlagPath(installRoot);
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    }
+
+    bool WriteLegacyAuthorNoteFlag(const std::wstring& installRoot)
+    {
+        const std::wstring path = GetLegacyAuthorNoteFlagPath(installRoot);
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+
+        constexpr char value[] = "shown\n";
+        DWORD written = 0;
+        const bool succeeded = WriteFile(file, value, static_cast<DWORD>(sizeof(value) - 1), &written, nullptr)
+            && written == sizeof(value) - 1
+            && FlushFileBuffers(file);
+        CloseHandle(file);
+        return succeeded;
+    }
+
+    bool IsAuthorNoteMarkedForUser(const std::wstring& userStateSubKey)
+    {
+        DWORD value = 0;
+        DWORD valueSize = sizeof(value);
+        return RegGetValueW(HKEY_CURRENT_USER, userStateSubKey.c_str(), AuthorNoteStateValueName,
+            RRF_RT_REG_DWORD, nullptr, &value, &valueSize) == ERROR_SUCCESS
+            && value == 1;
+    }
+
+    bool MarkAuthorNoteForUser(const std::wstring& userStateSubKey)
+    {
+        HKEY key = nullptr;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, userStateSubKey.c_str(), 0, nullptr,
+            REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        {
+            return false;
+        }
+
+        constexpr DWORD shown = 1;
+        const bool succeeded = RegSetValueExW(key, AuthorNoteStateValueName, 0, REG_DWORD,
+            reinterpret_cast<const BYTE*>(&shown), sizeof(shown)) == ERROR_SUCCESS;
+        RegCloseKey(key);
+        return succeeded;
+    }
+}
+
 namespace bootstrapper
 {
     bool IsNet10DesktopRuntimeVersion(const std::wstring& version)
@@ -92,5 +151,27 @@ namespace bootstrapper
     bool ShouldOfferApplicationEntry(bool setupFinished, bool setupSucceeded)
     {
         return setupFinished && setupSucceeded;
+    }
+
+    bool IsAuthorNoteShown(const std::wstring& installRoot, const std::wstring& userStateSubKey)
+    {
+        if (IsAuthorNoteMarkedForUser(userStateSubKey))
+        {
+            WriteLegacyAuthorNoteFlag(installRoot);
+            return true;
+        }
+
+        if (!HasLegacyAuthorNoteFlag(installRoot))
+            return false;
+
+        MarkAuthorNoteForUser(userStateSubKey);
+        return true;
+    }
+
+    bool MarkAuthorNoteShown(const std::wstring& installRoot, const std::wstring& userStateSubKey)
+    {
+        const bool userStateWritten = MarkAuthorNoteForUser(userStateSubKey);
+        const bool legacyFlagWritten = WriteLegacyAuthorNoteFlag(installRoot);
+        return userStateWritten || legacyFlagWritten;
     }
 }

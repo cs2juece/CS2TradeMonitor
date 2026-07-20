@@ -11,6 +11,8 @@ namespace CS2TradeMonitor.src.Core
         public const string GiteeHome = "https://gitee.com/cs2juece/CS2TradeMonitor";
         public const string GiteeReleases = "https://gitee.com/cs2juece/CS2TradeMonitor/releases";
         public const string GiteeLatestJson = "https://gitee.com/cs2juece/CS2TradeMonitor/raw/update/latest.json";
+        public const string GitHubLatestJson = "https://raw.githubusercontent.com/cs2juece/CS2TradeMonitor/update/latest.json";
+        public const string GitHubVersionJson = "https://raw.githubusercontent.com/cs2juece/CS2TradeMonitor/update/version.json";
         // Gitee Release 附件 URL 含服务端分配的附件 ID，由发布工作流写入清单。
         public const string GiteePackageBase = "";
         public const string CloudflareReleases = "";

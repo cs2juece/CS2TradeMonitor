@@ -27,7 +27,8 @@ namespace CS2TradeMonitor.src.Core
             bool playSound,
             bool showToast,
             string? source = null,
-            string? dedupKey = null)
+            string? dedupKey = null,
+            bool sendToPhone = false)
         {
             Title = title;
             Message = message;
@@ -37,6 +38,7 @@ namespace CS2TradeMonitor.src.Core
             ShowToast = showToast;
             Source = source;
             DedupKey = dedupKey;
+            SendToPhone = sendToPhone;
         }
 
         public string Title { get; }
@@ -47,5 +49,6 @@ namespace CS2TradeMonitor.src.Core
         public bool ShowToast { get; }
         public string? Source { get; }
         public string? DedupKey { get; }
+        public bool SendToPhone { get; }
     }
 }

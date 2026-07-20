@@ -11,7 +11,6 @@ public static class RuntimeHeartbeatService
 {
     private static string? _pidFile;
     private static string? _crashMarkerFile;
-    private static System.Threading.Timer? _heartbeatTimer;
     private static bool _started;
 
     /// <summary>
@@ -43,18 +42,6 @@ public static class RuntimeHeartbeatService
             DiagnosticsLogger.Ignored("RuntimeHeartbeat", "Start", ex, retryable: true, category: "Diagnostics");
         }
 
-        _heartbeatTimer = new System.Threading.Timer(_ =>
-        {
-            try
-            {
-                WriteHeartbeat();
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.Ignored("RuntimeHeartbeat", "WriteHeartbeat", ex, retryable: true, category: "Diagnostics");
-            }
-        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
-
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop();
         AppDomain.CurrentDomain.UnhandledException += (_, _) => MarkCrash();
 
@@ -78,15 +65,12 @@ public static class RuntimeHeartbeatService
     }
 
     /// <summary>
-    /// Stops heartbeat updates and removes the pid file.
+    /// Removes the pid file.
     /// </summary>
     public static void Stop()
     {
         try
         {
-            _heartbeatTimer?.Dispose();
-            _heartbeatTimer = null;
-
             if (_pidFile != null && File.Exists(_pidFile))
                 File.Delete(_pidFile);
         }

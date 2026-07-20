@@ -25,6 +25,8 @@ namespace CS2TradeMonitor.src.UI.Framework
     {
         public const int MinIntervalMs = 16;
         public const int MaxIntervalMs = 1000;
+        private const int DetailedFrameThresholdMs = 16;
+        private const int StatsIntervalMs = 60_000;
 
         private static readonly Lazy<RenderScheduler> LazyInstance =
             new Lazy<RenderScheduler>(() => new RenderScheduler());
@@ -185,7 +187,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                     using (UiJankProfiler.Measure(
                         isLayeredRenderTarget ? "RenderScheduler.CommitLayeredFrame" : "RenderScheduler.Invalidate",
                         $"{control.GetType().Name}; Bounds={control.ClientSize.Width}x{control.ClientSize.Height}; FullArea=True",
-                        thresholdMs: 1))
+                        thresholdMs: UiJankProfiler.VerboseLoggingEnabled ? 1 : DetailedFrameThresholdMs))
                     {
                         if (control is ILayeredRenderTarget layeredRenderTarget)
                         {
@@ -262,7 +264,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         private void LogStatsIfNeeded(int flushedControls)
         {
             DateTime now = DateTime.UtcNow;
-            if (_lastStatsUtc != DateTime.MinValue && (now - _lastStatsUtc).TotalMilliseconds < 1000)
+            if (_lastStatsUtc != DateTime.MinValue && (now - _lastStatsUtc).TotalMilliseconds < StatsIntervalMs)
             {
                 return;
             }

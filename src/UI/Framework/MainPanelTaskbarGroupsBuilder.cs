@@ -107,6 +107,11 @@ namespace CS2TradeMonitor.src.UI.Framework
         public void CreateAdvancedBehaviorGroup()
         {
             var group = new LiteSettingsGroup("任务栏高级");
+            _taskbarControls.Add(_addToggle(group, "Menu.TaskbarClickThrough", nameof(Settings.TaskbarClickThrough), false, _ =>
+            {
+                _ensureSafeVisibility(null, _taskbarShowCheck);
+                _refreshMonitorDisplay();
+            }));
             _taskbarControls.Add(_addToggle(group, "Menu.TaskbarHoverShowAll", nameof(Settings.TaskbarHoverShowAll), true, null));
             SetTaskbarControlsEnabled(_getBool(nameof(Settings.ShowTaskbar), true));
             _addGroupToPage(group);

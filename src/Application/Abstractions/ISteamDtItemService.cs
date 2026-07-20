@@ -16,7 +16,7 @@ namespace CS2TradeMonitor.Application.Abstractions
 
         Task FetchAllEnabledItemsAsync();
 
-        Task<bool> FetchItemPriceAsync(ItemMonitorConfig item, bool persistSettings = true);
+        Task<bool> FetchItemPriceAsync(ItemMonitorConfig item);
 
         Task<List<SteamDtSearchCandidate>> SearchItemsAsync(string keyword);
 

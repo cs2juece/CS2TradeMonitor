@@ -13,6 +13,8 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         public string Sha256 { get; init; } = "";
         public bool ParseSucceeded { get; init; }
         public bool Truncated { get; init; }
+        public bool SampledOut { get; init; }
+        public string? SampleReason { get; init; }
         public JsonNode? RedactedBody { get; init; }
         public string? RedactedFragment { get; init; }
         public string? FailureReason { get; init; }
@@ -25,7 +27,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         public const string RedactedSecret = "[REDACTED]";
         private static readonly HashSet<string> VerifiedSafeBodyFields = new(StringComparer.Ordinal)
         {
-            "code", "msg", "message", "success", "status", "error", "errors", "reason", "result", "results",
+            "code", "msg", "message", "errorcode", "errorcodestr", "errormsg", "success", "status", "error", "errors", "reason", "result", "results",
             "data", "list", "items", "item", "rows", "values", "value", "name", "title", "type", "category",
             "enabled", "available", "valid", "retryable", "skipped", "completed", "state", "action", "scene",
             "count", "total", "page", "pagesize", "size", "length", "index", "rank", "position", "quantity",

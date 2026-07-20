@@ -39,6 +39,7 @@ namespace
     constexpr COLORREF DialogBorder = RGB(56, 63, 73);
     constexpr COLORREF DialogPrimary = RGB(0, 120, 215);
     constexpr wchar_t AuthorDivider[] = L"────────────────────────────────────────────────────────────────────────────────────────────────────────";
+    constexpr wchar_t AuthorNoteUserStateSubKey[] = L"Software\\CS2TradeMonitor";
     constexpr UINT_PTR RuntimeProgressTimer = 1;
     std::wstring BootstrapperLogPath;
 
@@ -806,33 +807,13 @@ namespace
         return state.closed;
     }
 
-    bool IsAuthorNoteShown(const std::wstring& installRoot)
-    {
-        const std::wstring path = JoinPath(installRoot, L"user-data\\data\\author-note-shown.flag");
-        const DWORD attributes = GetFileAttributesW(path.c_str());
-        return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
-    }
-
-    void MarkAuthorNoteShown(const std::wstring& installRoot)
-    {
-        const std::wstring path = JoinPath(installRoot, L"user-data\\data\\author-note-shown.flag");
-        UniqueHandle file(CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL, nullptr));
-        if (!file)
-            return;
-        constexpr char value[] = "shown\n";
-        DWORD written = 0;
-        WriteFile(file.Get(), value, static_cast<DWORD>(sizeof(value) - 1), &written, nullptr);
-        FlushFileBuffers(file.Get());
-    }
-
     void ShowAuthorNoteOnce(const std::wstring& installRoot)
     {
-        if (IsAuthorNoteShown(installRoot))
+        if (bootstrapper::IsAuthorNoteShown(installRoot, AuthorNoteUserStateSubKey))
             return;
         std::wstring text = ReadUtf8File(JoinPath(installRoot, L"resources\\author-note.txt"));
         if (!text.empty() && ShowAuthorDialog(text))
-            MarkAuthorNoteShown(installRoot);
+            bootstrapper::MarkAuthorNoteShown(installRoot, AuthorNoteUserStateSubKey);
     }
 
     void AppendFailureLog(const std::wstring& detail);
@@ -1183,6 +1164,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         ShowNativePrompt(L"软件启动失败", L"软件启动失败，请重新下载完整安装包。", false, true);
         return 1;
     }
-    MarkAuthorNoteShown(installRoot);
+    bootstrapper::MarkAuthorNoteShown(installRoot, AuthorNoteUserStateSubKey);
     return 0;
 }

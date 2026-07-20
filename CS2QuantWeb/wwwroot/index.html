@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>CS2 量化研究台</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-block">
+      <span class="eyebrow">CS2 TRADE MONITOR</span>
+      <h1>量化研究台</h1>
+      <p>结构、趋势与风险信号集中复核</p>
+    </div>
+    <div class="service-state" id="serviceState" role="status" aria-live="polite">
+      <span class="state-dot" aria-hidden="true"></span>
+      <span>正在连接本地服务</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="source-panel" aria-labelledby="sourceTitle">
+      <div class="section-heading compact-heading">
+        <div>
+          <span class="section-kicker">数据入口</span>
+          <h2 id="sourceTitle">搜索单品并读取 K 线</h2>
+        </div>
+        <p id="sourceHint">搜索本地饰品库；一年以内读取日线，两年和全部读取周线。</p>
+      </div>
+      <form id="sourceForm" class="source-form">
+        <label>
+          <span>数据源</span>
+          <select id="sourceSelect" name="source">
+            <option value="item" selected>SteamDT 单品 K 线</option>
+            <option value="csqaq">CSQAQ 大盘日线</option>
+            <option value="csv">本地 CSV</option>
+          </select>
+        </label>
+        <label id="itemField" class="item-search-field">
+          <span>搜索单品</span>
+          <div class="item-search-shell">
+            <input id="itemSearchInput" type="search" maxlength="120" autocomplete="off"
+                   placeholder="输入中文名或 MarketHashName"
+                   role="combobox" aria-autocomplete="list" aria-controls="itemSuggestions"
+                   aria-expanded="false">
+            <ul id="itemSuggestions" class="item-suggestions" role="listbox" hidden></ul>
+          </div>
+          <small id="itemSearchStatus" class="item-search-status" aria-live="polite">输入至少 2 个字符开始搜索</small>
+        </label>
+        <label id="symbolField" hidden>
+          <span>CSV 文件名</span>
+          <input id="symbolInput" name="symbol" type="text" maxlength="120" autocomplete="off" placeholder="例如：my-data.csv">
+        </label>
+        <button class="primary-button" id="analyzeButton" type="submit">开始分析</button>
+        <a class="secondary-button disabled" id="exportLink" href="#" aria-disabled="true">导出信号 CSV</a>
+      </form>
+      <div class="message hidden" id="message" role="alert"></div>
+    </section>
+
+    <section id="workspace" class="workspace" aria-busy="false" hidden>
+      <div class="summary-grid" id="summaryGrid" aria-label="核心指标"></div>
+
+      <article class="card chart-card">
+        <div class="card-header chart-header">
+          <div>
+            <span class="section-kicker">行情与结构</span>
+            <h2 id="seriesTitle"></h2>
+            <p id="seriesMeta"></p>
+          </div>
+          <label class="range-control">
+            <span>显示范围</span>
+            <select id="rangeSelect">
+              <option value="30" selected>30 天</option>
+              <option value="60">60 天</option>
+              <option value="90">90 天</option>
+              <option value="180">半年</option>
+              <option value="365">一年</option>
+              <option value="730">两年</option>
+              <option value="all">全部</option>
+            </select>
+          </label>
+        </div>
+        <div class="legend" aria-label="图例">
+          <span><i class="legend-line ma5"></i>MA5</span>
+          <span><i class="legend-line ma10"></i>MA10</span>
+          <span><i class="legend-line ma20"></i>MA20</span>
+          <span><i class="legend-line stroke"></i>缠论笔</span>
+          <span><i class="legend-box center"></i>中枢</span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="marketChart" role="img" aria-label="K 线、均线、缠论笔和 MACD 图"></canvas>
+          <div id="chartTooltip" class="chart-tooltip" hidden></div>
+        </div>
+      </article>
+
+      <div class="analysis-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <span class="section-kicker">结构摘要</span>
+              <h2>精简缠论</h2>
+            </div>
+            <span class="method-badge">候选信号</span>
+          </div>
+          <div id="structureStats" class="structure-stats"></div>
+          <ol id="chanConclusions" class="conclusion-list"></ol>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <span class="section-kicker">轻量验证</span>
+              <h2>信号回看</h2>
+            </div>
+            <span class="method-badge neutral">无账户状态</span>
+          </div>
+          <div id="backtestGrid" class="backtest-grid"></div>
+          <p class="card-note">买入信号与后续首个卖出信号配对，只用于规则回看；不模拟资金、仓位和订单。</p>
+        </article>
+      </div>
+
+      <article class="card signals-card">
+        <div class="card-header signals-header">
+          <div>
+            <span class="section-kicker">可复核明细</span>
+            <h2>研究信号</h2>
+          </div>
+          <div class="table-filters">
+            <label>
+              <span class="sr-only">按方向筛选</span>
+              <select id="sideFilter">
+                <option value="all">全部方向</option>
+                <option value="Buy">买入候选</option>
+                <option value="Sell">卖出候选</option>
+                <option value="Risk">风险提示</option>
+              </select>
+            </label>
+            <label>
+              <span class="sr-only">搜索策略或原因</span>
+              <input id="signalSearch" type="search" placeholder="搜索策略或原因">
+            </label>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">量化研究信号列表</caption>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>类别</th>
+                <th>方向</th>
+                <th>价格</th>
+                <th>触发原因</th>
+              </tr>
+            </thead>
+            <tbody id="signalRows"></tbody>
+          </table>
+          <div id="emptySignals" class="empty-state" hidden>当前筛选下没有信号。</div>
+        </div>
+      </article>
+
+      <footer class="disclaimer">
+        <strong>研究边界</strong>
+        <span id="methodNote">本页只做结构和信号研究，不连接交易账户，不执行交易。</span>
+      </footer>
+    </section>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

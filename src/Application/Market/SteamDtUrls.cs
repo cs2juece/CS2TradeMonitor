@@ -6,7 +6,6 @@ namespace CS2TradeMonitor.Application.Market
         public const string WebBase = "https://www.steamdt.com";
         public const string SettingsPage = WebBase + "/my/setting";
         public const string OfficialItemPriceEndpoint = "/open/cs2/item/v1/price";
-        public const string OfficialItemKlineEndpoint = "/open/cs2/item/v1/kline";
         public const string PublicDefaultConfig = WebBase + "/api/user/system-config/v1/default-config";
         public const string PublicBlockSummary = WebBase + "/api/user/item/block/v1/summary";
         public const string PublicBlockSuggest = WebBase + "/api/user/item/block/v1/suggest";

@@ -569,8 +569,20 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         private RedesignCardPanel CreateTaskbarAdvancedCard()
         {
-            var card = CreateCard("任务栏高级", "鼠标悬停行为", UIUtils.S(116));
-            card.Controls.Add(CreateHorizontalSwitchRow("鼠标悬停显示详情", "显示被折叠的完整监控项", 28, 56, nameof(Settings.TaskbarHoverShowAll), true));
+            var card = CreateCard("任务栏高级", "鼠标交互与悬停行为", UIUtils.S(166));
+            card.Controls.Add(CreateHorizontalSwitchRow(
+                "任务栏鼠标穿透",
+                "开启后鼠标操作会穿过任务栏文字",
+                28,
+                56,
+                nameof(Settings.TaskbarClickThrough),
+                false,
+                _ =>
+                {
+                    MainPanelSafeVisibilityResult visibility = EnsureSafeVisibility();
+                    ApplySafeVisibilityToRuntime(visibility);
+                }));
+            card.Controls.Add(CreateHorizontalSwitchRow("鼠标悬停显示详情", "显示被折叠的完整监控项", 28, 108, nameof(Settings.TaskbarHoverShowAll), true));
             return card;
         }
 
@@ -1215,7 +1227,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             try
             {
                 _steamDtItemService.Configure(Get(nameof(Settings.SteamDtApiKey), string.Empty));
-                await _steamDtItemService.FetchItemPriceAsync(item, persistSettings: false);
+                await _steamDtItemService.FetchItemPriceAsync(item);
                 if (PageToken.IsCancellationRequested || IsDisposed)
                     return;
 
@@ -1704,7 +1716,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 Get(nameof(Settings.HideTrayIcon), false),
                 Get(nameof(Settings.ShowTaskbar), true),
                 Get(nameof(Settings.ClickThrough), false),
-                taskbarClickThrough: false);
+                Get(nameof(Settings.TaskbarClickThrough), false));
             if (visibility.RequiresCorrection)
             {
                 Set(nameof(Settings.HideMainForm), visibility.HideMainForm);

@@ -1,11 +1,14 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.YouPin;
+using CS2TradeMonitor.Infrastructure.Diagnostics;
 using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.UI;
 using CS2TradeMonitor.src.UI.Framework;
 using CS2TradeMonitor.src.UI.Helpers;
+using CS2TradeMonitor.src.UI.SettingsPage;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -26,6 +29,8 @@ namespace CS2TradeMonitor
         private readonly MainFormWinHelper _winHelper;
         private readonly MainFormBizHelper _bizHelper;
         private readonly IRenderScheduler _renderScheduler;
+        private readonly ISoftwareUpdateService _softwareUpdates;
+        private readonly SoftwareUpdateAutoCheckCoordinator _softwareUpdateAutoCheck;
         private readonly int _wmTaskbarCreated;
         private const int WM_DISPLAYCHANGE = 0x007E;
         private const int WM_CONTEXTMENU = 0x007B;
@@ -150,10 +155,55 @@ namespace CS2TradeMonitor
             string? startupSettingsPage = ExtractStartupSettingsPage(args);
             bool openSettings = !string.IsNullOrWhiteSpace(startupSettingsPage)
                 || args.Any(arg => string.Equals(arg, "--open-settings", StringComparison.OrdinalIgnoreCase));
+            bool updateCompleted = SoftwareUpdateStartup.IsUpdateCompleted(args);
+            string? updateTransactionId = SoftwareUpdateStartup.GetTransactionId(args);
+            using IDisposable? updateScope = updateCompleted && updateTransactionId is not null
+                ? DetailedDiagnosticOperationContext.Begin(updateTransactionId)
+                : null;
 
-            DiagnosticsLogger.Info(
+            DiagnosticsLogger.InfoEvent(
                 "Startup",
-                $"Received forwarded startup args. OpenSettings={openSettings}; Page={DiagnosticsLogger.Redact(startupSettingsPage ?? string.Empty)}");
+                updateCompleted ? "UpdateRestartReceived" : "ForwardedStartupArgumentsReceived",
+                "Received forwarded startup arguments.",
+                new Dictionary<string, object?>
+                {
+                    ["openSettings"] = openSettings,
+                    ["updateCompleted"] = updateCompleted,
+                    ["settingsPage"] = DiagnosticsLogger.Redact(startupSettingsPage ?? string.Empty),
+                    ["transactionId"] = updateTransactionId
+                });
+
+            if (updateCompleted)
+            {
+                if (WindowState == FormWindowState.Minimized)
+                    WindowState = FormWindowState.Normal;
+
+                _bizHelper.ForceShow(30.0);
+                BringToFront();
+                Activate();
+                GlobalPromptService.Notify(
+                    "更新成功",
+                    SoftwareUpdateStartup.BuildSuccessMessage(System.Windows.Forms.Application.ProductVersion),
+                    GlobalPromptKind.Success,
+                    source: "SoftwareUpdate",
+                    dedupKey: "software-update-success",
+                    owner: this,
+                    respectDoNotDisturb: false);
+                DiagnosticsLogger.InfoEvent(
+                    "SoftwareUpdate",
+                    "UpdateSuccessFeedbackShown",
+                    "The updated application displayed its main window and success feedback.",
+                    new Dictionary<string, object?>
+                    {
+                        ["transactionId"] = updateTransactionId,
+                        ["mainWindowShown"] = Visible,
+                        ["windowState"] = WindowState.ToString(),
+                        ["feedbackShown"] = true
+                    });
+
+                if (!openSettings)
+                    return;
+            }
 
             if (openSettings)
             {
@@ -170,6 +220,9 @@ namespace CS2TradeMonitor
         }
 
         public void ToggleMainWindowFromEntryPoint() => _bizHelper.ToggleMainWindowFromTray();
+
+        public void ConfigureAutomaticSoftwareUpdateChecks(bool enabled)
+            => _softwareUpdateAutoCheck.Configure(enabled);
 
         // ==== 任务栏显示 ====
         private TaskbarForm? _taskbar;
@@ -229,6 +282,7 @@ namespace CS2TradeMonitor
             _openSettingsOnStartup = openSettingsOnStartup;
             _startupSettingsPage = startupSettingsPage;
             _renderScheduler = runtimeServices.RenderScheduler;
+            _softwareUpdates = runtimeServices.SoftwareUpdates;
 
             // 语言加载
             if (string.IsNullOrEmpty(_cfg.Language))
@@ -278,6 +332,9 @@ namespace CS2TradeMonitor
 
             _bizHelper = new MainFormBizHelper(this, _cfg, _ui, _winHelper);
             _bizHelper.Initialize();
+            _softwareUpdateAutoCheck = new SoftwareUpdateAutoCheckCoordinator(
+                _softwareUpdates,
+                ShowAutomaticSoftwareUpdateAsync);
 
             // 3. 事件绑定
             BindEvents();
@@ -612,6 +669,7 @@ namespace CS2TradeMonitor
                 _bizHelper.KeepVisible(3.0); // 启动保护期
 
                 if (_cfg.ShowTaskbar) ToggleTaskbar(true);
+                ConfigureAutomaticSoftwareUpdateChecks(_cfg.AutoCheckSoftwareUpdates);
 
                 // 这样既检查了驱动，也检查了更新，以及置顶 透明度 穿透 等，而且时机完美（窗口显示后）
                 if (_bizHelper != null)
@@ -660,6 +718,48 @@ namespace CS2TradeMonitor
             {
                 DiagnosticsLogger.Error("Startup", "Startup market index refresh failed.", ex);
             }
+        }
+
+        private Task ShowAutomaticSoftwareUpdateAsync(SoftwareUpdateCheckResult update)
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void ShowUpdate()
+            {
+                try
+                {
+                    if (IsDisposed || Disposing)
+                        return;
+
+                    if (WindowState == FormWindowState.Minimized)
+                        WindowState = FormWindowState.Normal;
+                    _bizHelper.ForceShow(30.0);
+                    BringToFront();
+                    Activate();
+                    using var dialog = new SoftwareUpdateDialog(update, _softwareUpdates);
+                    dialog.ShowDialog(this);
+                }
+                finally
+                {
+                    completion.TrySetResult();
+                }
+            }
+
+            try
+            {
+                if (IsDisposed || Disposing)
+                    completion.TrySetResult();
+                else if (InvokeRequired)
+                    BeginInvoke((Action)ShowUpdate);
+                else
+                    ShowUpdate();
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+
+            return completion.Task;
         }
 
         private void QueueOpenCommandLineSettingsPage(string? settingsPage, string reason)
@@ -770,6 +870,7 @@ namespace CS2TradeMonitor
 
             _layeredRenderBuffer?.Dispose();
             _layeredRenderBuffer = null;
+            _softwareUpdateAutoCheck.Dispose();
             _ui?.Dispose();
             _bizHelper.Dispose();
         }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Windows.Forms;
@@ -14,6 +15,8 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public static bool Enabled => EnabledValue || DetailedDiagnosticsRuntime.IsEnabled;
 
+        public static bool VerboseLoggingEnabled => EnabledValue;
+
         public static IDisposable Measure(string scope, string detail = "", long thresholdMs = 16)
         {
             if (!Enabled)
@@ -27,7 +30,17 @@ namespace CS2TradeMonitor.src.UI.Framework
             if (!Enabled)
                 return;
 
-            DiagnosticsLogger.Info("Perf", $"{scope}; {detail}; Thread={Thread.CurrentThread.ManagedThreadId}; MessageLoop={System.Windows.Forms.Application.MessageLoop}");
+            DiagnosticsLogger.InfoEvent(
+                "Perf",
+                "PerformanceSample",
+                $"{scope}; {detail}; Thread={Thread.CurrentThread.ManagedThreadId}; MessageLoop={System.Windows.Forms.Application.MessageLoop}",
+                new Dictionary<string, object?>
+                {
+                    ["scope"] = scope,
+                    ["detail"] = detail,
+                    ["threadId"] = Thread.CurrentThread.ManagedThreadId,
+                    ["messageLoop"] = System.Windows.Forms.Application.MessageLoop
+                });
         }
 
         private static bool ResolveEnabled()
@@ -72,9 +85,19 @@ namespace CS2TradeMonitor.src.UI.Framework
                     return;
 
                 string suffix = string.IsNullOrWhiteSpace(_detail) ? string.Empty : "; " + _detail;
-                DiagnosticsLogger.Info(
+                DiagnosticsLogger.InfoEvent(
                     "Perf",
-                    $"{_scope}; ElapsedMs={_stopwatch.Elapsed.TotalMilliseconds:F2}{suffix}; Thread={Thread.CurrentThread.ManagedThreadId}; MessageLoop={System.Windows.Forms.Application.MessageLoop}");
+                    "SlowOperation",
+                    $"{_scope}; ElapsedMs={_stopwatch.Elapsed.TotalMilliseconds:F2}{suffix}; Thread={Thread.CurrentThread.ManagedThreadId}; MessageLoop={System.Windows.Forms.Application.MessageLoop}",
+                    new Dictionary<string, object?>
+                    {
+                        ["scope"] = _scope,
+                        ["detail"] = _detail,
+                        ["elapsedMs"] = _stopwatch.Elapsed.TotalMilliseconds,
+                        ["thresholdMs"] = _thresholdMs,
+                        ["threadId"] = Thread.CurrentThread.ManagedThreadId,
+                        ["messageLoop"] = System.Windows.Forms.Application.MessageLoop
+                    });
             }
         }
 

@@ -70,6 +70,7 @@
     "TaskbarShow": "任务栏显示",
     "TaskbarSingleLine": "单行显示",
     "TaskbarHoverShowAll": "鼠标悬停显示详情",
+    "TaskbarClickThrough": "任务栏鼠标穿透",
     "TaskbarStyle": "任务栏样式",
     "TaskbarMonitor": "显示器屏幕",
     "TaskbarStyleBold": "粗字模式",

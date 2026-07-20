@@ -253,7 +253,10 @@ namespace CS2TradeMonitor.src.UI.Helpers
                     return System.Windows.Forms.MessageBox.Show(owner, text, caption, buttons, icon);
 
                 using var dialog = new GlobalPromptDialog(caption, text, buttons, icon);
-                return owner != null ? dialog.ShowDialog(owner) : dialog.ShowDialog();
+                Form? stableOwner = GlobalPromptPositioning.ResolveStableOwner(owner, dialog.Size);
+                Screen screen = GlobalPromptPositioning.ResolveScreen(owner, stableOwner);
+                dialog.Location = GlobalPromptPositioning.CalculateLocation(screen.WorkingArea, dialog.Size, stableOwner?.Bounds);
+                return stableOwner != null ? dialog.ShowDialog(stableOwner) : dialog.ShowDialog();
             }
             catch (Exception ex)
             {
@@ -656,7 +659,7 @@ namespace CS2TradeMonitor.src.UI.Helpers
             AccessibleName = Text;
             AccessibleDescription = message;
             FormBorderStyle = FormBorderStyle.None;
-            StartPosition = FormStartPosition.CenterParent;
+            StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
             MinimizeBox = false;
             MaximizeBox = false;

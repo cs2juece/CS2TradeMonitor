@@ -209,7 +209,7 @@ namespace CS2TradeMonitor.src.Core.Actions
 
         public static void ApplyTaskbarClickThrough(Settings cfg, UIController? ui, MainForm form, bool clickThrough)
         {
-            cfg.TaskbarClickThrough = false;
+            cfg.TaskbarClickThrough = clickThrough;
             cfg.Save();
             ApplyVisibility(cfg, form);
             ApplyTaskbarStyle(cfg, ui);
@@ -234,9 +234,11 @@ namespace CS2TradeMonitor.src.Core.Actions
             // 2. 系统级设置
             // 开机启动会调用 schtasks 写计划任务，只能在开关变化时执行，避免每次应用设置都触发杀软拦截。
             if (applyAutoStart) ApplyAutoStart(cfg);
+            mainForm.ConfigureAutomaticSoftwareUpdateChecks(cfg.AutoCheckSoftwareUpdates);
             MarketDataSourceManager.Configure(cfg);
             services.YouPinInventory.Configure(cfg);
             services.YouPinSaleReminders.Configure(cfg);
+            services.YouPinGridTrading.Configure(cfg);
             services.MarketAlerts.ApplySettings(cfg);
             _ = RefreshMarketDataAsync(mainForm, services.RenderScheduler);
             ApplyWindowAttributes(cfg, mainForm); // 基础窗口属性

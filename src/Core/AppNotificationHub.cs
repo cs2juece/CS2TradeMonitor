@@ -22,9 +22,19 @@ namespace CS2TradeMonitor.src.Core
             bool playSound = false,
             bool showToast = true,
             string? source = null,
-            string? dedupKey = null)
+            string? dedupKey = null,
+            bool sendToPhone = false)
         {
-            var args = new AppNotificationEventArgs(title, message, severity, placement, playSound, showToast, source, dedupKey);
+            var args = new AppNotificationEventArgs(
+                title,
+                message,
+                severity,
+                placement,
+                playSound,
+                showToast,
+                source,
+                dedupKey,
+                sendToPhone);
             var handlers = NotificationRequested;
             if (handlers == null)
                 return;

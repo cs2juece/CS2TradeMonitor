@@ -14,6 +14,7 @@ using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core.Refresh;
 using CS2TradeMonitor.Domain.Market;
+using CS2MarketData.Core;
 using static CS2TradeMonitor.Application.Market.SteamDtItemJsonParser;
 
 
@@ -22,7 +23,7 @@ namespace CS2TradeMonitor.Application.Market
     public partial class SteamDtItemService
     {
 
-        public async Task<bool> FetchItemPriceAsync(ItemMonitorConfig item, bool persistSettings = true)
+        public async Task<bool> FetchItemPriceAsync(ItemMonitorConfig item)
         {
             await _fetchLock.WaitAsync();
             try
@@ -305,12 +306,6 @@ namespace CS2TradeMonitor.Application.Market
                     ClearFetchFailureLog(item);
                     EvaluateItemPriceAlert(item, data);
 
-                    if (persistSettings)
-                    {
-                        // 上方已修改共享配置对象里的单品状态，这里触发一次持久化保存。
-                        Settings.Load().Save();
-                    }
-
                     return true;
                 }
                 else
@@ -370,11 +365,9 @@ namespace CS2TradeMonitor.Application.Market
             {
                 item.PriceAlertBaselinePrice = data.Price;
                 item.PriceAlertBaselineTime = nowMs;
-                if (!item.PriceAlertEnabled)
-                    return;
             }
 
-            if (!item.PriceAlertEnabled)
+            if (!item.PriceAlertDesktopEnabled && !item.PriceAlertPhoneEnabled)
                 return;
 
             var reasons = new List<string>();
@@ -454,7 +447,10 @@ namespace CS2TradeMonitor.Application.Market
                 message,
                 AppNotificationSeverity.Warning,
                 AppNotificationPlacement.BottomLeft,
-                playSound: true);
+                playSound: item.PriceAlertDesktopEnabled,
+                showToast: item.PriceAlertDesktopEnabled,
+                source: "单品监控",
+                sendToPhone: item.PriceAlertPhoneEnabled);
         }
 
 
@@ -503,41 +499,23 @@ namespace CS2TradeMonitor.Application.Market
             if (string.IsNullOrWhiteSpace(marketHashName) || string.IsNullOrWhiteSpace(_apiKey))
                 return null;
 
-            foreach (string platform in new[] { "", "buff" })
+            try
             {
-                try
+                SteamDtKlineSeries series = await _klineClient.FetchDailyAsync(marketHashName, _apiKey);
+                SteamDtItemData? data = SteamDtItemJsonParser.CreateOfficialKlineData(series.ClosingPrices);
+                if (data is not null)
                 {
-                    var payload = new
-                    {
-                        marketHashName = marketHashName.Trim(),
-                        type = 1,
-                        platform,
-                        specialStyle = ""
-                    };
-
-                    var request = new HttpRequestMessage(HttpMethod.Post, SteamDtUrls.OfficialItemKlineEndpoint);
-                    request.Headers.Add("Authorization", "Bearer " + _apiKey);
-                    request.Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
-
-                    var response = await _http.SendAsync(request);
-                    if (!response.IsSuccessStatusCode)
-                        continue;
-
-                    string body = await response.Content.ReadAsStringAsync();
-                    var data = ParseOfficialKlineData(body);
-                    if (data != null)
-                    {
-                        data.Source = string.IsNullOrWhiteSpace(platform) ? "官方 K线" : $"官方 K线/{platform}";
-                        return data;
-                    }
+                    data.Source = string.IsNullOrWhiteSpace(series.Platform)
+                        ? "官方 K线"
+                        : $"官方 K线/{series.Platform}";
                 }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.Info("SteamDTItem", $"Official kline exception for item hash: {ex.Message}");
-                }
+                return data;
             }
-
-            return null;
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.Info("SteamDTItem", $"Official kline exception for item hash: {ex.Message}");
+                return null;
+            }
         }
 
         private void LogFetchFailure(ItemMonitorConfig item, string errorMsg)
@@ -699,28 +677,14 @@ namespace CS2TradeMonitor.Application.Market
             }
 
             LoadLocalItemsFile();
-            SteamDtSearchCandidate? match = null;
-
-            if (!string.IsNullOrWhiteSpace(item.Name))
-            {
-                string normalizedName = NormalizeForSearch(item.Name);
-                match = _localItemsCache?.FirstOrDefault(candidate =>
-                    candidate.Name.Equals(item.Name, StringComparison.OrdinalIgnoreCase) ||
-                    candidate.MarketHashName.Equals(item.Name, StringComparison.OrdinalIgnoreCase) ||
-                    NormalizeForSearch(candidate.Name).Equals(normalizedName, StringComparison.OrdinalIgnoreCase));
-            }
-
-            match ??= _localItemsCache?.FirstOrDefault(candidate =>
-                (!string.IsNullOrWhiteSpace(item.PlatformItemId) && candidate.PlatformItemId.Equals(item.PlatformItemId, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrWhiteSpace(item.ItemId) && candidate.PlatformItemId.Equals(item.ItemId, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrWhiteSpace(item.ItemId) && candidate.MarketHashName.Equals(item.ItemId, StringComparison.OrdinalIgnoreCase)));
+            SteamDtCatalogItem? match = _localItemCatalog?.FindExact(item.Name, item.PlatformItemId, item.ItemId);
 
             if (match != null && !string.IsNullOrWhiteSpace(match.MarketHashName))
             {
                 item.MarketHashName = match.MarketHashName;
                 if (string.IsNullOrWhiteSpace(item.PlatformItemId))
                 {
-                    item.PlatformItemId = match.PlatformItemId;
+                    item.PlatformItemId = match.ItemId;
                 }
                 return item.MarketHashName;
             }

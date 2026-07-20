@@ -15,6 +15,9 @@ namespace CS2TradeMonitor.src.UI
         private readonly int _autoApplyIntervalMs;
         private System.Windows.Forms.Timer? _timer;
         private long _lastAutoApplyTick;
+        private bool _tracking;
+        private bool _paused;
+        private bool _changePending;
 
         public SettingsFormUiTickCoordinator(
             Func<bool> isFormDisposedOrDisposing,
@@ -32,29 +35,41 @@ namespace CS2TradeMonitor.src.UI
 
         public void StartDirtyTracking()
         {
-            EnsureTimer();
-            long now = _getTickCount();
-            _lastAutoApplyTick = now;
-            _timer?.Start();
+            _tracking = true;
+            _paused = false;
+            StartTimerForPendingChange(resetDelay: true);
+        }
+
+        public void NotifySettingsChanged()
+        {
+            if (_isFormDisposedOrDisposing())
+                return;
+
+            _changePending = true;
+            _lastAutoApplyTick = _getTickCount();
+            StartTimerForPendingChange(resetDelay: false);
         }
 
         public void Pause()
         {
+            _paused = true;
             _timer?.Stop();
         }
 
         public void Resume()
         {
-            if (_timer == null || _isFormDisposedOrDisposing())
+            _paused = false;
+            if (_isFormDisposedOrDisposing())
                 return;
 
-            long now = _getTickCount();
-            _lastAutoApplyTick = now;
-            _timer.Start();
+            StartTimerForPendingChange(resetDelay: true);
         }
 
         public void Dispose()
         {
+            _tracking = false;
+            _paused = true;
+            _changePending = false;
             _timer?.Stop();
             _timer?.Dispose();
             _timer = null;
@@ -76,14 +91,28 @@ namespace CS2TradeMonitor.src.UI
 
         internal void ProcessTick(long now)
         {
-            if (_isFormDisposedOrDisposing())
+            if (!_tracking || _paused || !_changePending || _isFormDisposedOrDisposing())
                 return;
 
             if (now - _lastAutoApplyTick >= _autoApplyIntervalMs)
             {
-                _lastAutoApplyTick = now;
+                _changePending = false;
                 _applyPendingSettings();
+                if (!_changePending)
+                    _timer?.Stop();
             }
+        }
+
+        private void StartTimerForPendingChange(bool resetDelay)
+        {
+            if (!_tracking || _paused || !_changePending || _isFormDisposedOrDisposing())
+                return;
+
+            if (resetDelay)
+                _lastAutoApplyTick = _getTickCount();
+
+            EnsureTimer();
+            _timer?.Start();
         }
     }
 }

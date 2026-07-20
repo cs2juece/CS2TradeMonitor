@@ -419,7 +419,8 @@ namespace CS2TradeMonitor.Application.YouPin
                 "YouPinLandlord",
                 $"Inventory listing contract selected. Run={NormalizeCorrelationId(runId)}; "
                 + $"Action={NormalizeCorrelationId(actionId)}; HeaderProfile=legacy-android-5.28.3; "
-                + "BodyProfile=steamauto-minimal-normal-v1; Mode=normal");
+                + $"BodyProfile={(command.IsCanSold && !command.IsCanLease ? "official-minimal-sale-v1" : "steamauto-minimal-normal-v1")}; "
+                + $"Mode={(command.IsCanSold && !command.IsCanLease ? "sale" : "normal")}");
             for (int attempt = 1; attempt <= InventoryWriteMaxAttempts; attempt++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -740,11 +741,37 @@ namespace CS2TradeMonitor.Application.YouPin
             var request = new HttpRequestMessage(
                 HttpMethod.Post,
                 YouPinUrls.ApiBase + YouPinUrls.LandlordListInventory);
+            if (command.IsCanSold && !command.IsCanLease)
+            {
+                request.Content = YouPinMobileApiClient.JsonContent(new
+                {
+                    GameId = 730,
+                    ItemInfos = new[]
+                    {
+                        new Dictionary<string, object>
+                        {
+                            ["AssetId"] = assetId,
+                            ["IsCanSold"] = true,
+                            ["IsCanLease"] = false,
+                            ["Remark"] = string.Empty,
+                            ["Price"] = command.SellPrice.ToString("0.##", CultureInfo.InvariantCulture)
+                        }
+                    },
+                    Sessionid = device
+                });
+                YouPinSaleReminderHttpHelper.ApplyYouPinLegacyAndroidHeaders(
+                    request,
+                    credential.Token,
+                    device,
+                    credential.Uk);
+                return request;
+            }
+
             var itemInfo = new Dictionary<string, object>
             {
                 ["AssetId"] = assetId,
-                ["IsCanLease"] = true,
-                ["IsCanSold"] = false,
+                ["IsCanLease"] = command.IsCanLease,
+                ["IsCanSold"] = command.IsCanSold,
                 ["LeaseDeposit"] = command.Deposit.ToString("0.##", CultureInfo.InvariantCulture),
                 ["LeaseMaxDays"] = command.LeaseMaxDays,
                 ["LeaseUnitPrice"] = command.ShortRent,
@@ -1524,6 +1551,23 @@ namespace CS2TradeMonitor.Application.YouPin
                                                 ? (YouPinLandlordInventoryEligibilityCode.SteamTradeUnavailable,
                                                     "Steam 交易状态暂不可用")
                                                 : (YouPinLandlordInventoryEligibilityCode.Eligible, "符合普通出租上架资格");
+            string saleReason = !item.Tradable
+                ? "Steam 当前不可交易"
+                : !item.SteamMarketable
+                    ? "Steam 当前不可在市场流通"
+                    : item.AssetStatus != 0
+                        ? "库存状态暂不可出售"
+                        : item.TradeProtect != 0
+                            ? "仍处于交易保护期"
+                            : !qualification.StoreOnline
+                                ? "悠悠店铺当前不可上架"
+                                : qualification.ProhibitSale
+                                    ? FirstText(qualification.Message, "悠悠暂不允许出售")
+                                    : qualification.ExcludedAssetIds.Contains(item.AssetId)
+                                        ? "悠悠上架资格校验未包含此饰品"
+                                        : qualification.SteamTradeStatus != 0
+                                            ? "Steam 交易状态暂不可用"
+                                            : string.Empty;
 
             return new YouPinLandlordRemoteInventoryItem(
                 item.AssetId,
@@ -1537,7 +1581,9 @@ namespace CS2TradeMonitor.Application.YouPin
                 item.NormalChargePercent,
                 item.VipChargePercent,
                 profile.VipSwitchStatus != 0 ? profile.VipSwitchStatus : item.VipSwitchStatus,
-                item.MarketHashName);
+                item.MarketHashName,
+                saleReason.Length == 0,
+                saleReason.Length == 0 ? "符合悠悠出售上架资格" : saleReason);
         }
 
         private static IReadOnlyDictionary<string, InventoryListingProfile> ParseInventoryListingProfiles(

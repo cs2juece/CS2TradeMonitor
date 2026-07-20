@@ -14,6 +14,7 @@ namespace CS2TradeMonitor
     public static class TaskbarRenderer
     {
         private static Font? _cachedFont;
+        private static TaskbarFontCacheKey? _cachedFontKey;
 
         private static readonly Color LABEL_LIGHT = Color.FromArgb(20, 20, 20);
         private static readonly Color SAFE_LIGHT = Color.FromArgb(0x00, 0x80, 0x40);
@@ -48,7 +49,10 @@ namespace CS2TradeMonitor
             float taskbarDpiScale = CS2TradeMonitor.src.UI.Helpers.TaskbarWinHelper.GetTaskbarDpi() / 96f;
             string fontFamily = string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily;
             float fontSize = style.FontSize <= 0 ? 9f : style.FontSize;
-            _cachedFont = UIUtils.GetFont(fontFamily, fontSize * taskbarDpiScale, style.FontBold);
+            float scaledFontSize = fontSize * taskbarDpiScale;
+            var fontKey = new TaskbarFontCacheKey(fontFamily, scaledFontSize, style.FontBold);
+            if (_cachedFont == null || _cachedFontKey != fontKey)
+                ReplaceCachedFont(CreateOwnedFont(fontFamily, scaledFontSize, style.FontBold), fontKey);
 
             _useCustom = true;
             try
@@ -204,9 +208,8 @@ namespace CS2TradeMonitor
 
         private static void EnsureFont()
         {
-            if (IsFontUsable(_cachedFont)) return;
+            if (_cachedFont != null) return;
 
-            _cachedFont = null;
             try
             {
                 ReloadStyle(MetricRuntimeServices.Resolve().AppConfigState.TaskbarStyle);
@@ -216,24 +219,37 @@ namespace CS2TradeMonitor
                 // 样式加载失败时使用默认字体兜底，任务栏渲染不能因此中断。
             }
 
-            _cachedFont ??= UIUtils.GetFont("Segoe UI", 9f, false);
+            if (_cachedFont == null)
+            {
+                var fallbackKey = new TaskbarFontCacheKey("Segoe UI", 9f, false);
+                ReplaceCachedFont(CreateOwnedFont(fallbackKey.Family, fallbackKey.Size, fallbackKey.Bold), fallbackKey);
+            }
         }
 
-        private static bool IsFontUsable(Font? font)
+        private static Font CreateOwnedFont(string familyName, float size, bool bold)
         {
-            if (font == null) return false;
-
             try
             {
-                _ = font.FontFamily.Name;
-                _ = font.Size;
-                return true;
+                return new Font(familyName, size, bold ? FontStyle.Bold : FontStyle.Regular);
             }
             catch
             {
-                return false;
+                return new Font(
+                    SystemFonts.DefaultFont.FontFamily,
+                    size,
+                    bold ? FontStyle.Bold : FontStyle.Regular);
             }
         }
+
+        private static void ReplaceCachedFont(Font next, TaskbarFontCacheKey key)
+        {
+            Font? previous = _cachedFont;
+            _cachedFont = next;
+            _cachedFontKey = key;
+            previous?.Dispose();
+        }
+
+        private readonly record struct TaskbarFontCacheKey(string Family, float Size, bool Bold);
 
         private static void DrawPreviewPair(Graphics g, string label, string value, Font font, Rectangle rc, Color labelColor, Color valueColor)
         {

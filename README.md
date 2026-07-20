@@ -35,11 +35,15 @@ CS2 Trade Monitor 基于 .NET 10 WinForms 与 AntdUI 构建，强调轻量常驻
 
 ### 💰 风控与提醒
 
-按整库或指定饰品设置止损、止盈**提醒阈值**，并按 QAQ / SteamDT 点位或涨跌幅规则触发桌面、托盘或手机提醒。手机通知可通过用户配置的第三方推送服务发送，同时支持 CS2 更新和模块健康状态检测。
+按整库或指定饰品设置止损、止盈**提醒阈值**，并按 QAQ / SteamDT 大盘点位、单品价格或涨跌幅规则触发桌面、托盘或手机提醒。手机通知可通过用户配置的第三方推送服务发送，同时支持 CS2 更新和模块健康状态检测。
 
 ### 📊 盈亏统计
 
 根据悠悠相关历史成交记录汇总单品盈亏（吃米 / 亏米）与交易明细，帮助用户复盘已有数据；统计结果仅供参考，不构成交易或投资建议。
+
+### 📈 本机量化研究
+
+“量化研究”页面可启动随安装包提供的本机只读网页服务，并查看日 K、均线、MACD、精简缠论结构、候选价格信号与 CSV 导出。服务默认只监听 `127.0.0.1:5078`，不读取交易账户，也不执行交易；若电脑缺少 Microsoft ASP.NET Core Runtime 10（x64），页面会显示中文说明并可打开微软官方下载地址。
 
 ## 🛡️ 安全与隐私承诺
 
@@ -117,6 +121,9 @@ CS2TradeMonitor.sln
 CS2TradeMonitor.csproj
 CS2TradeMonitor.Bootstrapper/
 CS2TradeMonitor.Updater/
+CS2MarketData.Core/
+CS2QuantWeb.Core/
+CS2QuantWeb/
 CS2TradeMonitor.Tests/
 src/
   Application/
@@ -132,6 +139,9 @@ docs/
 - `src/Application`：Steam、悠悠等应用层服务和业务投影。
 - `src/System`：历史服务、系统集成和兼容逻辑。
 - `src/UI`：WinForms / AntdUI 页面、控件和设置中心。
+- `CS2MarketData.Core`：桌面端与量化网页共享的饰品目录检索、SteamDT K 线契约和解析核心。
+- `CS2QuantWeb.Core`：无账户状态的量化计算与结构分析核心。
+- `CS2QuantWeb`：随安装包分发、默认仅监听本机回环地址的 ASP.NET Core 网页服务。
 - `CS2TradeMonitor.Tests`：xUnit 测试。
 
 更完整的分层和维护边界见 [架构文档](docs/ARCHITECTURE.md)。

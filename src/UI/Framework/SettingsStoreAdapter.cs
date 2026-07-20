@@ -37,16 +37,23 @@ namespace CS2TradeMonitor.src.UI.Framework
             }
         }
 
-        public void Apply(Settings settings)
+        public void Apply(Settings settings, IReadOnlyCollection<string> changedKeys)
         {
             if (settings is null)
                 throw new ArgumentNullException(nameof(settings));
+            if (changedKeys is null)
+                throw new ArgumentNullException(nameof(changedKeys));
 
             var snapshot = _settingsStore.Snapshot;
-            foreach (PropertyInfo property in GetMappableProperties())
+            var properties = GetMappableProperties()
+                .ToDictionary(property => property.Name, StringComparer.Ordinal);
+            foreach (string key in changedKeys)
             {
-                if (!snapshot.TryGetValue(property.Name, out object? value))
+                if (!properties.TryGetValue(key, out PropertyInfo? property)
+                    || !snapshot.TryGetValue(key, out object? value))
+                {
                     continue;
+                }
 
                 if (TryConvertValue(value, property.PropertyType, out object? convertedValue))
                 {

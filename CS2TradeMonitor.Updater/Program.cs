@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Text.Json;
 using CS2TradeMonitor.Updater.Paths;
 using CS2TradeMonitor.UpdateSecurity;
 
@@ -14,6 +15,8 @@ namespace CS2TradeMonitor.Updater
         private const string UpdaterRelativePath = @"app\CS2TradeMonitor.Updater.exe";
         private const string SuccessFlagName = "CS2TradeMonitor_UpdateSuccess.flag";
         private const string ErrorLogName = "CS2TradeMonitor_UpdateError.log";
+        private const string DiagnosticLogName = "CS2TradeMonitor_UpdateDiagnostic.jsonl";
+        private const long MaximumDiagnosticLogBytes = 1024 * 1024;
 
         internal sealed class UpdateArgs
         {
@@ -21,6 +24,7 @@ namespace CS2TradeMonitor.Updater
             public string InstallDir { get; set; } = "";
             public string LauncherPath { get; set; } = "";
             public string InstanceHash { get; set; } = "";
+            public string DiagnosticTransactionId { get; set; } = "";
             public int Pid { get; set; }
             public bool Restart { get; set; }
         }
@@ -35,17 +39,22 @@ namespace CS2TradeMonitor.Updater
             string? validatedInstallDir = null;
             Mutex? updateMutex = null;
             bool ownsMutex = false;
+            string stage = "ValidateArguments";
             try
             {
                 NormalizeAndValidateArguments(parsed);
                 validatedInstallDir = parsed.InstallDir;
+                WriteDiagnosticEvent(parsed, "UpdaterStarted", stage);
 
+                stage = "AcquireUpdateMutex";
                 string mutexName = "Global\\CS2TradeMonitor.Update." + parsed.InstanceHash;
                 updateMutex = new Mutex(initiallyOwned: true, mutexName, out ownsMutex);
                 if (!ownsMutex)
                     throw new InvalidOperationException("当前目录实例已有更新任务正在执行。");
 
+                stage = "WaitForMainProcessExit";
                 WaitForMainProcessExit(parsed.Pid, parsed.InstallDir);
+                WriteDiagnosticEvent(parsed, "MainProcessExited", stage);
 
                 string workRoot = Path.Combine(
                     Path.GetTempPath(),
@@ -60,17 +69,31 @@ namespace CS2TradeMonitor.Updater
 
                 try
                 {
+                    stage = "ValidateArchive";
                     ValidateArchiveEntries(parsed.ZipPath);
+                    WriteDiagnosticEvent(parsed, "ArchiveValidated", stage);
+                    stage = "ExtractArchive";
                     ZipFile.ExtractToDirectory(parsed.ZipPath, extractDir, overwriteFiles: true);
                     string sourceRoot = ResolvePackageRoot(extractDir);
+                    stage = "ValidatePackage";
                     ValidatePackageRoot(sourceRoot);
 
+                    stage = "ApplyProgramFiles";
                     UpdatePackageInstaller.Apply(sourceRoot, parsed.InstallDir, backupDir);
+                    WriteDiagnosticEvent(parsed, "ProgramFilesApplied", stage);
                     WriteStatusFile(parsed.InstallDir, SuccessFlagName, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                     TryDelete(parsed.ZipPath);
 
                     if (parsed.Restart)
-                        RestartMain(parsed.LauncherPath, parsed.InstallDir);
+                    {
+                        stage = "RestartMain";
+                        bool restarted = RestartMain(
+                            parsed.LauncherPath,
+                            parsed.InstallDir,
+                            parsed.DiagnosticTransactionId);
+                        WriteDiagnosticEvent(parsed, restarted ? "RestartStarted" : "RestartFailed", stage);
+                    }
+                    WriteDiagnosticEvent(parsed, "UpdaterCompleted", "Completed");
                     return 0;
                 }
                 finally
@@ -81,7 +104,10 @@ namespace CS2TradeMonitor.Updater
             catch (Exception ex)
             {
                 if (!string.IsNullOrWhiteSpace(validatedInstallDir))
+                {
+                    WriteDiagnosticEvent(parsed, "UpdaterFailed", stage, ex);
                     WriteError(validatedInstallDir, ex);
+                }
                 return 1;
             }
             finally
@@ -111,6 +137,7 @@ namespace CS2TradeMonitor.Updater
                     case "--install-dir": result.InstallDir = NextValue(); break;
                     case "--launcher": result.LauncherPath = NextValue(); break;
                     case "--instance-hash": result.InstanceHash = NextValue(); break;
+                    case "--diagnostic-transaction-id": result.DiagnosticTransactionId = NextValue(); break;
                     case "--pid": int.TryParse(NextValue(), out int pid); result.Pid = pid; break;
                     case "--restart": result.Restart = true; break;
                 }
@@ -132,6 +159,15 @@ namespace CS2TradeMonitor.Updater
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             args.LauncherPath = Path.GetFullPath(args.LauncherPath);
             args.InstanceHash = args.InstanceHash.Trim().ToLowerInvariant();
+            args.DiagnosticTransactionId = string.IsNullOrWhiteSpace(args.DiagnosticTransactionId)
+                ? Guid.NewGuid().ToString("N")
+                : args.DiagnosticTransactionId.Trim().ToLowerInvariant();
+
+            if (args.DiagnosticTransactionId.Length != 32
+                || !args.DiagnosticTransactionId.All(Uri.IsHexDigit))
+            {
+                throw new InvalidDataException("更新诊断事务标识无效。");
+            }
 
             if (!Directory.Exists(args.InstallDir))
                 throw new DirectoryNotFoundException("安装目录不存在：" + args.InstallDir);
@@ -229,21 +265,54 @@ namespace CS2TradeMonitor.Updater
             _ = ProgramFileManifestPolicy.LoadAndValidate(sourceRoot);
         }
 
-        private static void RestartMain(string launcherPath, string installDir)
+        private static bool RestartMain(string launcherPath, string installDir, string transactionId)
         {
             try
             {
-                Process.Start(new ProcessStartInfo
+                var startInfo = new ProcessStartInfo
                 {
                     FileName = launcherPath,
-                    Arguments = "--updated",
                     WorkingDirectory = installDir,
                     UseShellExecute = true
-                });
+                };
+                startInfo.ArgumentList.Add("--updated");
+                startInfo.ArgumentList.Add("--update-transaction=" + transactionId);
+                Process.Start(startInfo);
+                return true;
             }
             catch
             {
                 // The update is already applied; restart failure is reported on the next manual launch.
+                return false;
+            }
+        }
+
+        private static void WriteDiagnosticEvent(UpdateArgs args, string eventName, string stage, Exception? exception = null)
+        {
+            try
+            {
+                string statusDirectory = Path.Combine(args.InstallDir, "user-data", "updates");
+                Directory.CreateDirectory(statusDirectory);
+                string path = Path.Combine(statusDirectory, DiagnosticLogName);
+                if (File.Exists(path) && new FileInfo(path).Length >= MaximumDiagnosticLogBytes)
+                    File.Move(path, path + ".1", overwrite: true);
+
+                string line = JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["timestampUtc"] = DateTime.UtcNow,
+                    ["transactionId"] = args.DiagnosticTransactionId,
+                    ["event"] = eventName,
+                    ["stage"] = stage,
+                    ["processId"] = Environment.ProcessId,
+                    ["restartRequested"] = args.Restart,
+                    ["exceptionType"] = exception?.GetType().FullName,
+                    ["hresult"] = exception?.HResult
+                });
+                File.AppendAllText(path, line + Environment.NewLine, new System.Text.UTF8Encoding(false));
+            }
+            catch
+            {
+                // Updater diagnostics are best effort and must never replace the update result.
             }
         }
 

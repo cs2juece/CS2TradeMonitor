@@ -46,6 +46,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 Padding = Padding.Empty
             };
             _settingsTransaction = new SettingsTransaction(() => Config);
+            _settingsTransaction.Draft.DraftChanged += (_, __) => NotifySettingsChanged();
             Controls.Add(_pageHost);
         }
 

@@ -45,6 +45,7 @@ namespace CS2TradeMonitor.src.SystemServices
 
     public sealed class SoftwareUpdateDownloadResult
     {
+        public string TransactionId { get; init; } = "";
         public string ZipPath { get; init; } = "";
         public string SourceUrl { get; init; } = "";
         public long SizeBytes { get; init; }

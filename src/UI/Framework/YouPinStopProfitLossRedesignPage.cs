@@ -27,6 +27,7 @@ namespace CS2TradeMonitor.src.UI.Framework
     public sealed class YouPinStopProfitLossRedesignPage : FrameworkSettingsPageBase
     {
         private readonly IYouPinInventoryService _inventoryService;
+        private readonly UiDeferredActionScheduler _itemRowRefreshScheduler;
         private Label? _enabledStateLabel;
         private Label? _runStateLabel;
         private Label? _lastScanLabel;
@@ -92,6 +93,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         {
             ArgumentNullException.ThrowIfNull(runtimeServices);
             _inventoryService = runtimeServices.Inventory;
+            _itemRowRefreshScheduler = new UiDeferredActionScheduler(() => !IsDisposed && !Disposing);
             Container.SizeChanged += (_, __) => QueueDeferredWidthSync();
         }
 
@@ -127,6 +129,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 _pageBuildTimer?.Stop();
                 _pageBuildTimer?.Dispose();
                 _pageBuildTimer = null;
+                _itemRowRefreshScheduler.Dispose();
                 foreach (Control row in _itemRowCache.Values.ToList())
                     row.Dispose();
                 _itemRowCache.Clear();
@@ -1552,6 +1555,12 @@ namespace CS2TradeMonitor.src.UI.Framework
             _itemRowsHost.PerformLayout();
         }
 
+        private void QueueSingleItemRowRefresh(StopProfitLossDisplayRow row)
+        {
+            string key = "YouPinStopProfitLoss.ItemRow." + BuildDisplayRowKey(row);
+            _itemRowRefreshScheduler.Schedule(key, 1, () => RefreshSingleItemRow(row));
+        }
+
         private Control GetOrCreateItemRuleRow(StopProfitLossDisplayRow row)
         {
             string key = BuildDisplayRowKey(row);
@@ -2061,7 +2070,14 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         private static LiteNumberInput CreateItemPercentInput(string text, Color color, bool enabled)
         {
-            var input = new LiteNumberInput(ExtractPercentText(text), "%", "", 72, color, maxLength: 6)
+            var input = new LiteNumberInput(
+                ExtractPercentText(text),
+                "%",
+                "",
+                72,
+                color,
+                maxLength: 6,
+                allowNegative: false)
             {
                 Enabled = enabled && !IsDirectionClosed(text)
             };
@@ -2100,16 +2116,21 @@ namespace CS2TradeMonitor.src.UI.Framework
             ConfigureInventoryService();
             RefreshStatusLabels();
             RefreshSummaryLabels();
-            RefreshSingleItemRow(row);
+            QueueSingleItemRowRefresh(row);
             Invalidate(true);
         }
 
         private void CommitItemPercentInput(StopProfitLossDisplayRow row, LiteNumberInput input, bool isProfit)
         {
-            if (!input.Enabled || !TryParsePercentInput(input.Inner.Text, out double value))
+            if (!input.Enabled
+                || !TryParsePercentInput(input.Inner.Text, out double value)
+                || value <= 0
+                || value > 1000)
+            {
+                input.Inner.Text = ExtractPercentText(isProfit ? row.ProfitText : row.LossText);
                 return;
+            }
 
-            value = Math.Clamp(value, 0.01, 1000.0);
             UpdateRule(row, rule =>
             {
                 if (isProfit)
@@ -2160,7 +2181,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             Set(nameof(Settings.YouPinStopProfitLossItemRulesJson), YouPinStopProfitLossRuleStore.SaveRules(rules));
             ConfigureInventoryService();
             RefreshRuntimeView(refreshRows: false);
-            RefreshSingleItemRow(row);
+            QueueSingleItemRowRefresh(row);
         }
 
         private void RemoveRuleOrKeyword(StopProfitLossDisplayRow row)
@@ -2347,7 +2368,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 else
                     checkedItems.Remove(item);
             };
-            search.Inner.TextChanged += (_, __) => renderCandidates();
+            search.CommittedTextChanged += (_, __) => renderCandidates();
             renderCandidates();
 
             var ok = new Button { Text = "添加", DialogResult = DialogResult.OK };

@@ -10,14 +10,22 @@ using CS2TradeMonitor.src.SystemServices;
 
 namespace CS2TradeMonitor
 {
-    public readonly record struct SettingsSaveResult(bool Succeeded, string? FailureType)
+    public readonly record struct SettingsSaveResult(
+        bool Succeeded,
+        string? FailureType,
+        int? FailureHResult,
+        string? FailureStage)
     {
-        public static SettingsSaveResult Success { get; } = new(true, null);
+        public static SettingsSaveResult Success { get; } = new(true, null, null, null);
 
-        public static SettingsSaveResult Failed(Exception exception)
+        public static SettingsSaveResult Failed(Exception exception, string failureStage)
         {
             ArgumentNullException.ThrowIfNull(exception);
-            return new SettingsSaveResult(false, exception.GetType().Name);
+            return new SettingsSaveResult(
+                false,
+                exception.GetType().Name,
+                exception.HResult,
+                string.IsNullOrWhiteSpace(failureStage) ? "Unknown" : failureStage);
         }
     }
 
@@ -131,10 +139,13 @@ namespace CS2TradeMonitor
             string tempPath,
             Action<Settings>? publish = null)
         {
+            string failureStage = "Normalize";
             try
             {
                 NormalizeSettings(settings);
+                failureStage = "Serialize";
                 var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+                failureStage = "AtomicWrite";
                 lock (_ioLock)
                 {
                     AtomicWrite(filePath, backupPath, tempPath, json);
@@ -143,10 +154,18 @@ namespace CS2TradeMonitor
             catch (Exception ex)
             {
                 CleanupTempFile(tempPath);
-                DiagnosticsLogger.Error(
+                DiagnosticsLogger.ErrorEvent(
                     "Settings",
-                    $"Configuration save failed. Category=UserSettings; FailureType={ex.GetType().Name}");
-                return SettingsSaveResult.Failed(ex);
+                    "SettingsSaveFailed",
+                    $"Configuration save failed. Category=UserSettings; FailureType={ex.GetType().Name}",
+                    new Dictionary<string, object?>
+                    {
+                        ["operation"] = "SaveUserSettings",
+                        ["failureStage"] = failureStage,
+                        ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                        ["hresult"] = ex.HResult
+                    });
+                return SettingsSaveResult.Failed(ex, failureStage);
             }
 
             publish?.Invoke(settings);
@@ -219,6 +238,13 @@ namespace CS2TradeMonitor
             s.DefaultItemPriceAlertCooldownMinutes = Math.Clamp(s.DefaultItemPriceAlertCooldownMinutes <= 0 ? 10 : s.DefaultItemPriceAlertCooldownMinutes, 1, 1440);
             foreach (var item in s.ItemConfigs)
             {
+                if (item.PriceAlertDeliverySchemaVersion < ItemMonitorConfig.CurrentPriceAlertDeliverySchemaVersion)
+                {
+                    item.PriceAlertDesktopEnabled = item.PriceAlertEnabled;
+                    item.PriceAlertPhoneEnabled = false;
+                    item.PriceAlertDeliverySchemaVersion = ItemMonitorConfig.CurrentPriceAlertDeliverySchemaVersion;
+                }
+                item.PriceAlertEnabled = item.PriceAlertDesktopEnabled || item.PriceAlertPhoneEnabled;
                 item.RefreshIntervalSec = Math.Max(60, item.RefreshIntervalSec <= 0 ? s.DefaultItemRefreshIntervalSec : item.RefreshIntervalSec);
                 item.PriceAlertRisePercent = Math.Clamp(item.PriceAlertRisePercent, 0, 1000);
                 item.PriceAlertFallPercent = Math.Clamp(item.PriceAlertFallPercent, 0, 1000);
@@ -480,7 +506,7 @@ namespace CS2TradeMonitor
             s.Cs2UpdateBaselineKey ??= "";
             s.Cs2UpdateBaselineTitle ??= "";
             s.Cs2UpdateLastStatus ??= "未检查";
-            EnsureBuiltinMarketAlertRules(s.MarketAlertRules);
+            MarketAlertRuleCatalog.EnsureBuiltinRules(s.MarketAlertRules);
             NormalizeMarketAlertRules(s.MarketAlertRules, s.MarketAlertDefaultWindowMinutes, s.MarketAlertDefaultCooldownMinutes);
             s.TaskbarFontSize = Math.Clamp(s.TaskbarFontSize, 7f, 18f);
             s.TaskbarItemSpacing = Math.Clamp(s.TaskbarItemSpacing, -20, 80);
@@ -562,44 +588,6 @@ namespace CS2TradeMonitor
                 "YouPinRental" => "YouPinRental",
                 _ => "Pure"
             };
-        }
-
-        private static void EnsureBuiltinMarketAlertRules(List<MarketAlertRule> rules)
-        {
-            var defaults = Settings.CreateDefaultMarketAlertRules();
-            foreach (var defaultRule in defaults)
-            {
-                var existing = rules.FirstOrDefault(r => string.Equals(r.Id, defaultRule.Id, StringComparison.OrdinalIgnoreCase));
-                if (existing == null)
-                {
-                    rules.Add(defaultRule);
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(existing.Name) || IsLegacyBuiltinMarketAlertRuleName(existing))
-                    existing.Name = defaultRule.Name;
-
-                if (string.IsNullOrWhiteSpace(existing.SourceId))
-                    existing.SourceId = defaultRule.SourceId;
-            }
-        }
-
-        private static bool IsLegacyBuiltinMarketAlertRuleName(MarketAlertRule rule)
-        {
-            if (rule.RuleType != MarketAlertRuleType.RiseByPercent
-                && rule.RuleType != MarketAlertRuleType.FallByPercent)
-            {
-                return false;
-            }
-
-            string source = string.Equals(rule.SourceId, CS2TradeMonitor.src.Core.MarketDataSourceManager.SteamDtId, StringComparison.OrdinalIgnoreCase)
-                ? "SteamDT"
-                : "QAQ";
-            string legacyName = rule.RuleType == MarketAlertRuleType.RiseByPercent
-                ? $"{source} 指定时间内上涨"
-                : $"{source} 指定时间内下跌";
-
-            return string.Equals(rule.Name?.Trim(), legacyName, StringComparison.Ordinal);
         }
 
         private static void AtomicWrite(

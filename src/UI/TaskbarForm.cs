@@ -17,6 +17,7 @@ namespace CS2TradeMonitor
         private readonly UIController _ui;
         private readonly MainForm _mainForm;
         private readonly IRenderScheduler _renderScheduler;
+        private readonly System.Windows.Forms.Timer _maintenanceTimer = new();
 
         // ★★★ 双助手架构 ★★★
         private readonly TaskbarWinHelper _winHelper;
@@ -34,6 +35,7 @@ namespace CS2TradeMonitor
         private int _lastPlacementHeight = -1;
         private bool _lastPlacementVertical = false;
         private string _lastPlacementSignature = "";
+        private bool? _lastAppliedClickThrough;
         private readonly TaskbarTooltipHelper _tooltipHelper;
 
         // 公开属性
@@ -45,8 +47,7 @@ namespace CS2TradeMonitor
         private const int WM_RBUTTONDOWN = 0x0204;
         private const int WM_RBUTTONUP = 0x0205;
         private const int WM_LBUTTONDBLCLK = 0x0203;
-        private const int WS_EX_APPWINDOW = 0x00040000;
-        private bool _isWin11;
+        private bool _isOpeningContextMenu;
 
         public TaskbarForm(Settings cfg, UIController ui, MainForm mainForm)
             : this(cfg, ui, mainForm, UIFrameworkRuntimeServices.ResolveRenderScheduler())
@@ -60,8 +61,6 @@ namespace CS2TradeMonitor
             _mainForm = mainForm;
             _renderScheduler = renderScheduler ?? throw new ArgumentNullException(nameof(renderScheduler));
             TargetDevice = _cfg.TaskbarMonitorDevice;
-
-            _isWin11 = Environment.OSVersion.Version >= new Version(10, 0, 22000);
 
             // 初始化组件
             _winHelper = new TaskbarWinHelper(this, _renderScheduler);
@@ -88,10 +87,12 @@ namespace CS2TradeMonitor
             _lastPlacementWidth = -1;
             _lastPlacementHeight = -1;
             _lastPlacementSignature = "";
-            _cfg.TaskbarClickThrough = false;
-            _winHelper.ApplyLayeredStyle(_bizHelper.TransparentKey, clickThrough: false);
+            ApplyInteractionMode(force: true);
 
             _ui.RefreshSnapshotApplied += ApplyUiSnapshot;
+            _maintenanceTimer.Interval = 1000;
+            _maintenanceTimer.Tick += OnMaintenanceTick;
+            _maintenanceTimer.Start();
             ApplyUiSnapshot(UiSnapshot.Empty);
         }
 
@@ -104,11 +105,10 @@ namespace CS2TradeMonitor
             _lastPlacementHeight = -1;
             _lastPlacementSignature = "";
             _lastLayoutSignature = ""; // 重置签名，强制重算
-            _winHelper.ApplyLayeredStyle(_bizHelper.TransparentKey, clickThrough: false);
             _bizHelper.CheckTheme(true);
 
             // 更新悬浮窗模式 (支持热切换)
-            _tooltipHelper?.ReloadMode();
+            ApplyInteractionMode(force: true);
 
             // 注意：这里仍然可能因为 _cols 为空而暂时不 Build，
             // 但随后的 snapshot 刷新会在获取到新数据后自动 Build
@@ -126,10 +126,12 @@ namespace CS2TradeMonitor
             if (disposing)
             {
                 _ui.RefreshSnapshotApplied -= ApplyUiSnapshot;
+                _maintenanceTimer.Stop();
+                _maintenanceTimer.Tick -= OnMaintenanceTick;
+                _maintenanceTimer.Dispose();
                 _winHelper?.RestoreTaskbar();
-                ContextMenuStrip? menu = _currentMenu;
+                _currentMenu?.Dispose();
                 _currentMenu = null;
-                MenuLifetime.DisposeLater(menu, _mainForm, "TaskbarForm.Dispose");
                 _tooltipHelper?.Dispose();
             }
             base.Dispose(disposing);
@@ -165,37 +167,27 @@ namespace CS2TradeMonitor
 
         private void ShowContextMenu()
         {
-            if (IsDisposed || Disposing || !IsHandleCreated)
+            if (IsDisposed || Disposing || !IsHandleCreated || _isOpeningContextMenu)
             {
                 return;
             }
 
-            ContextMenuStrip? oldMenu = _currentMenu;
-            _currentMenu = MenuManager.Build(_mainForm, _cfg, _ui, "Taskbar");
-            ContextMenuStrip menu = _currentMenu;
-            menu.Closed += (_, __) =>
-            {
-                if (ReferenceEquals(_currentMenu, menu))
-                {
-                    _currentMenu = null;
-                }
-
-                MenuLifetime.DisposeLater(menu, this, "TaskbarForm.MenuClosed");
-            };
-            MenuLifetime.DisposeLater(oldMenu, this, "TaskbarForm.ShowContextMenu");
-
+            _isOpeningContextMenu = true;
             try
             {
-                IntPtr menuHandle = menu.Handle;
-                int menuExStyle = GetWindowLong(menuHandle, GWL_EXSTYLE);
-                menuExStyle |= WS_EX_TOOLWINDOW;
-                menuExStyle &= ~WS_EX_APPWINDOW;
-                SetWindowLong(menuHandle, GWL_EXSTYLE, menuExStyle);
-                menu.Show(this, PointToClient(Cursor.Position));
+                _currentMenu?.Dispose();
+                _currentMenu = MenuManager.Build(_mainForm, _cfg, _ui, "Taskbar");
+
+                TaskbarWinHelper.ActivateWindow(Handle);
+                _currentMenu.Show(Cursor.Position);
             }
             catch (ObjectDisposedException)
             {
                 _currentMenu = null;
+            }
+            finally
+            {
+                _isOpeningContextMenu = false;
             }
         }
 
@@ -240,6 +232,8 @@ namespace CS2TradeMonitor
 
         private void RefreshFromSnapshot(UiSnapshot snapshot)
         {
+            ApplyInteractionMode();
+
             if (snapshot.ForceLayoutRebuild)
             {
                 _lastLayoutSignature = "";
@@ -247,24 +241,8 @@ namespace CS2TradeMonitor
                 _lastPlacementSignature = "";
             }
 
-            // [Fix] 周期性检查句柄，防止 Explorer 重启后句柄失效
-            // 优化：仅在重试期或句柄无效时调用 FindHandles，且限制调用频率
-            bool isHandleInvalid = _bizHelper.NeedsHandleRefresh();
-
-            // 如果处于重试期，或者句柄无效且距离上次查找超过2秒(防止无Explorer时高频空转)
-            if (isHandleInvalid && (DateTime.Now - _lastFindHandleTime).TotalSeconds > 2)
-            {
-                _bizHelper.FindHandles();
-                _lastFindHandleTime = DateTime.Now;
-            }
-
-            bool visualChanged = false;
-            var now = DateTime.Now;
-            if ((now - _lastThemeCheckTime).TotalSeconds >= 5)
-            {
-                visualChanged = _bizHelper.CheckTheme();
-                _lastThemeCheckTime = now;
-            }
+            bool handleRefreshed = RefreshHandlesIfNeeded();
+            bool visualChanged = RefreshThemeIfDue();
 
             // [Fix Part 1] 防空数据保护
             // 使用临时变量接收，先判断数据有效性，再赋值给成员变量 _cols
@@ -287,65 +265,15 @@ namespace CS2TradeMonitor
             }
 
             _cols = nextCols; // 确认有效后再更新引用
+            if (!_bizHelper.IsTaskbarValid())
+                return;
 
             Rectangle oldTaskbarRect = _bizHelper.Rect;
             _bizHelper.UpdateTaskbarRect();
-            bool placementChanged = oldTaskbarRect != _bizHelper.Rect;
-
-            // [Fix Part 2] 布局变更检测
-            if (_bizHelper.IsVertical())
-            {
-                // 垂直模式逻辑简单且无测量开销，直接重算即可
-                string currentSig = "vertical_" + _layout.GetLayoutSignature(_cols) + "_" + _bizHelper.Rect.Width;
-                if (currentSig != _lastLayoutSignature)
-                {
-                    _bizHelper.BuildVerticalLayout(_cols);
-                    _lastLayoutSignature = currentSig;
-                    placementChanged = true;
-                    visualChanged = true;
-                }
-            }
-            else
-            {
-                // [优化] 智能判断更新条件
-                // 1. 必须检查：如果列表是新生成的（坐标还没算过，Bounds为空），必须重算！
-                // 这解决了“主界面显隐导致任务栏消失”的问题
-                bool isUninitialized = (_cols.Count > 0 && _cols[0].Bounds.IsEmpty);
-
-                // 2. 常规检查：如果内容长度/结构变了（签名变了），也要重算
-                string currentSig = _layout.GetLayoutSignature(_cols) + "_" + _bizHelper.Height;
-                bool isContentChanged = (currentSig != _lastLayoutSignature);
-
-                if (isUninitialized || isContentChanged)
-                {
-                    _layout.Build(_cols, _bizHelper.Height);
-                    Width = _layout.PanelWidth;
-                    Height = _bizHelper.Height;
-
-                    _lastLayoutSignature = currentSig;
-                    placementChanged = true;
-                    visualChanged = true;
-                }
-            }
-
-            bool isVertical = _bizHelper.IsVertical();
-            string placementSignature = _bizHelper.GetPlacementSignature(Width);
-            placementChanged = placementChanged
-                || _lastPlacementWidth != Width
-                || _lastPlacementHeight != Height
-                || _lastPlacementRect != _bizHelper.Rect
-                || _lastPlacementVertical != isVertical
-                || _lastPlacementSignature != placementSignature;
-
-            if (placementChanged)
-            {
-                _bizHelper.UpdatePlacement(Width);
-                _lastPlacementWidth = Width;
-                _lastPlacementHeight = Height;
-                _lastPlacementRect = _bizHelper.Rect;
-                _lastPlacementVertical = isVertical;
-                _lastPlacementSignature = placementSignature;
-            }
+            bool geometryChanged = oldTaskbarRect != _bizHelper.Rect;
+            bool layoutChanged = RefreshLayoutForCurrentGeometry(force: geometryChanged);
+            visualChanged |= layoutChanged;
+            UpdatePlacementIfNeeded(handleRefreshed || geometryChanged || layoutChanged);
 
             if (_cfg.TaskbarHoverShowAll) _tooltipHelper.UpdateContent();
 
@@ -355,6 +283,113 @@ namespace CS2TradeMonitor
                 _lastRenderSignature = renderSig;
                 _renderScheduler.RequestRender(this);
             }
+        }
+
+        private void OnMaintenanceTick(object? sender, EventArgs e)
+        {
+            if (IsDisposed || Disposing || !IsHandleCreated)
+                return;
+
+            ApplyInteractionMode();
+            bool handleRefreshed = RefreshHandlesIfNeeded();
+            if (!_bizHelper.IsTaskbarValid())
+                return;
+
+            bool visualChanged = RefreshThemeIfDue();
+            Rectangle oldTaskbarRect = _bizHelper.Rect;
+            _bizHelper.UpdateTaskbarRect();
+            bool geometryChanged = oldTaskbarRect != _bizHelper.Rect;
+            bool layoutChanged = RefreshLayoutForCurrentGeometry(force: geometryChanged);
+
+            if (_cols != null && _cols.Count > 0)
+                UpdatePlacementIfNeeded(handleRefreshed || geometryChanged || layoutChanged);
+            if (visualChanged || layoutChanged)
+                _renderScheduler.RequestRender(this);
+        }
+
+        private bool RefreshHandlesIfNeeded()
+        {
+            if (!_bizHelper.NeedsHandleRefresh())
+                return false;
+
+            DateTime now = DateTime.Now;
+            if ((now - _lastFindHandleTime).TotalSeconds <= 2)
+                return false;
+
+            _bizHelper.FindHandles();
+            _lastFindHandleTime = now;
+            return _bizHelper.IsTaskbarValid();
+        }
+
+        private bool RefreshThemeIfDue()
+        {
+            DateTime now = DateTime.Now;
+            if ((now - _lastThemeCheckTime).TotalSeconds < 5)
+                return false;
+
+            _lastThemeCheckTime = now;
+            return _bizHelper.CheckTheme();
+        }
+
+        private bool RefreshLayoutForCurrentGeometry(bool force)
+        {
+            if (_cols == null || _cols.Count == 0)
+                return false;
+
+            if (_bizHelper.IsVertical())
+            {
+                string currentSignature = "vertical_" + _layout.GetLayoutSignature(_cols) + "_" + _bizHelper.Rect.Width;
+                if (!force && currentSignature == _lastLayoutSignature)
+                    return false;
+
+                _bizHelper.BuildVerticalLayout(_cols);
+                _lastLayoutSignature = currentSignature;
+                return true;
+            }
+
+            bool isUninitialized = _cols[0].Bounds.IsEmpty;
+            string layoutSignature = _layout.GetLayoutSignature(_cols) + "_" + _bizHelper.Height;
+            if (!force && !isUninitialized && layoutSignature == _lastLayoutSignature)
+                return false;
+
+            _layout.Build(_cols, _bizHelper.Height);
+            Width = _layout.PanelWidth;
+            Height = _bizHelper.Height;
+            _lastLayoutSignature = layoutSignature;
+            return true;
+        }
+
+        private void UpdatePlacementIfNeeded(bool force)
+        {
+            bool isVertical = _bizHelper.IsVertical();
+            string placementSignature = _bizHelper.GetPlacementSignature(Width);
+            bool placementChanged = force
+                || _lastPlacementWidth != Width
+                || _lastPlacementHeight != Height
+                || _lastPlacementRect != _bizHelper.Rect
+                || _lastPlacementVertical != isVertical
+                || _lastPlacementSignature != placementSignature;
+
+            if (!placementChanged)
+                return;
+
+            _bizHelper.UpdatePlacement(Width);
+            _lastPlacementWidth = Width;
+            _lastPlacementHeight = Height;
+            _lastPlacementRect = _bizHelper.Rect;
+            _lastPlacementVertical = isVertical;
+            _lastPlacementSignature = placementSignature;
+        }
+
+        private void ApplyInteractionMode(bool force = false)
+        {
+            bool clickThrough = _cfg.TaskbarClickThrough;
+            if (!force && _lastAppliedClickThrough == clickThrough)
+                return;
+
+            _winHelper.ApplyLayeredStyle(_bizHelper.TransparentKey, clickThrough);
+            _tooltipHelper.ReloadMode();
+            _lastAppliedClickThrough = clickThrough;
         }
 
         private static string GetRenderSignature(List<Column> cols)
@@ -408,6 +443,10 @@ namespace CS2TradeMonitor
                 CreateParams cp = base.CreateParams;
                 cp.ExStyle |= WS_EX_LAYERED | WS_EX_TOOLWINDOW;
                 cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE (防止点击激活窗口，避免抢占焦点)
+                if (_cfg != null && _cfg.TaskbarClickThrough)
+                {
+                    cp.ExStyle |= WS_EX_TRANSPARENT;
+                }
                 return cp;
             }
         }

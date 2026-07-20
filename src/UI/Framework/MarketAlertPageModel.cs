@@ -1,7 +1,5 @@
 using CS2TradeMonitor.src.Core;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace CS2TradeMonitor.src.UI.Framework
 {
@@ -54,50 +52,6 @@ namespace CS2TradeMonitor.src.UI.Framework
         public static bool IsBuiltinRule(MarketAlertRule rule)
         {
             return rule.Id.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase);
-        }
-
-        public static bool EnsureBuiltinRules(List<MarketAlertRule> rules, IEnumerable<MarketAlertRule> defaultRules)
-        {
-            ArgumentNullException.ThrowIfNull(rules);
-            ArgumentNullException.ThrowIfNull(defaultRules);
-
-            bool changed = false;
-            foreach (MarketAlertRule defaultRule in defaultRules)
-            {
-                MarketAlertRule? existing = rules.FirstOrDefault(rule => string.Equals(rule.Id, defaultRule.Id, StringComparison.OrdinalIgnoreCase));
-                if (existing == null)
-                {
-                    rules.Add(defaultRule);
-                    changed = true;
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(existing.Name) || IsLegacyBuiltinRuleName(existing))
-                {
-                    existing.Name = defaultRule.Name;
-                    changed = true;
-                }
-            }
-
-            return changed;
-        }
-
-        public static bool IsLegacyBuiltinRuleName(MarketAlertRule rule)
-        {
-            if (rule.RuleType != MarketAlertRuleType.RiseByPercent
-                && rule.RuleType != MarketAlertRuleType.FallByPercent)
-            {
-                return false;
-            }
-
-            string source = string.Equals(rule.SourceId, MarketDataSourceManager.SteamDtId, StringComparison.OrdinalIgnoreCase)
-                ? "SteamDT"
-                : "QAQ";
-            string legacyName = rule.RuleType == MarketAlertRuleType.RiseByPercent
-                ? $"{source} 指定时间内上涨"
-                : $"{source} 指定时间内下跌";
-
-            return string.Equals(rule.Name?.Trim(), legacyName, StringComparison.Ordinal);
         }
 
         public static string FormatThreshold(MarketAlertRule rule)

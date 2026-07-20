@@ -80,6 +80,34 @@ namespace CS2TradeMonitor.src.SystemServices
             Write(source, message);
         }
 
+        public static void InfoEvent(
+            string source,
+            string eventName,
+            string message,
+            IReadOnlyDictionary<string, object?>? data = null)
+        {
+            Write(
+                source,
+                message,
+                detailedEvent: eventName,
+                detailedData: data);
+        }
+
+        public static void WarningEvent(
+            string source,
+            string eventName,
+            string message,
+            IReadOnlyDictionary<string, object?>? data = null)
+        {
+            Write(
+                source,
+                message,
+                detailedLevel: "Warning",
+                detailedEvent: eventName,
+                detailedPriority: DetailedDiagnosticPriority.Critical,
+                detailedData: data);
+        }
+
         public static void InfoThrottled(string source, string key, string message, TimeSpan window)
         {
             if (string.IsNullOrWhiteSpace(key) || window <= TimeSpan.Zero)
@@ -106,11 +134,38 @@ namespace CS2TradeMonitor.src.SystemServices
         {
             if (ex == null)
             {
-                Write(source, message);
+                Write(
+                    source,
+                    message,
+                    detailedLevel: "Error",
+                    detailedEvent: "Error",
+                    detailedPriority: DetailedDiagnosticPriority.Critical);
                 return;
             }
 
             WriteBlock(source, message, ex);
+        }
+
+        public static void ErrorEvent(
+            string source,
+            string eventName,
+            string message,
+            IReadOnlyDictionary<string, object?>? data = null,
+            Exception? exception = null)
+        {
+            if (exception is null)
+            {
+                Write(
+                    source,
+                    message,
+                    detailedLevel: "Error",
+                    detailedEvent: eventName,
+                    detailedPriority: DetailedDiagnosticPriority.Critical,
+                    detailedData: data);
+                return;
+            }
+
+            WriteBlock(source, message, exception, eventName, data);
         }
 
         public static void Ignored(string source, string operation, Exception ex, bool retryable = false, string category = "BestEffort")
@@ -128,7 +183,13 @@ namespace CS2TradeMonitor.src.SystemServices
             Ignored("SuppressedException", operation, ex, retryable, category);
         }
 
-        private static void Write(string source, string message)
+        private static void Write(
+            string source,
+            string message,
+            string detailedLevel = "Information",
+            string detailedEvent = "Log",
+            DetailedDiagnosticPriority detailedPriority = DetailedDiagnosticPriority.Normal,
+            IReadOnlyDictionary<string, object?>? detailedData = null)
         {
             try
             {
@@ -148,10 +209,11 @@ namespace CS2TradeMonitor.src.SystemServices
                 if (written)
                 {
                     DetailedDiagnosticsRuntime.Record(
-                        "Information",
+                        detailedLevel,
                         safeSource,
-                        "Log",
-                        new Dictionary<string, object?> { ["message"] = safeMessage });
+                        detailedEvent,
+                        BuildDetailedData(safeMessage, detailedData),
+                        priority: detailedPriority);
                 }
             }
             catch
@@ -160,7 +222,12 @@ namespace CS2TradeMonitor.src.SystemServices
             }
         }
 
-        private static void WriteBlock(string source, string message, Exception ex)
+        private static void WriteBlock(
+            string source,
+            string message,
+            Exception ex,
+            string detailedEvent = "Exception",
+            IReadOnlyDictionary<string, object?>? detailedData = null)
         {
             try
             {
@@ -180,22 +247,32 @@ namespace CS2TradeMonitor.src.SystemServices
                 {
                     AppendText(logPath, block);
                 }
+                Dictionary<string, object?> payload = BuildDetailedData(safeMessage, detailedData);
+                payload["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
+                payload["exception"] = safeException;
+                payload["hresult"] = ex.HResult;
                 DetailedDiagnosticsRuntime.Record(
                     "Error",
                     safeSource,
-                    "Exception",
-                    new Dictionary<string, object?>
-                    {
-                        ["message"] = safeMessage,
-                        ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
-                        ["exception"] = safeException
-                    },
+                    detailedEvent,
+                    payload,
                     priority: DetailedDiagnosticPriority.Critical);
             }
             catch
             {
                 // Diagnostics must never affect the monitor itself.
             }
+        }
+
+        private static Dictionary<string, object?> BuildDetailedData(
+            string message,
+            IReadOnlyDictionary<string, object?>? data)
+        {
+            var payload = data is null
+                ? new Dictionary<string, object?>()
+                : new Dictionary<string, object?>(data, StringComparer.Ordinal);
+            payload["message"] = message;
+            return payload;
         }
 
         private static string? BuildCoalescedText(string source, string message, string line, DateTime now)

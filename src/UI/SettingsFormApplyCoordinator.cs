@@ -15,6 +15,7 @@ namespace CS2TradeMonitor.src.UI
     {
         private readonly Settings _liveSettings;
         private readonly Settings _draftSettings;
+        private Settings _baselineSettings;
         private readonly IDictionary<string, SettingsPageBase> _pages;
         private readonly Func<string> _getCurrentPageKey;
         private readonly Func<float> _getDpiScale;
@@ -40,6 +41,7 @@ namespace CS2TradeMonitor.src.UI
         {
             _liveSettings = liveSettings ?? throw new ArgumentNullException(nameof(liveSettings));
             _draftSettings = draftSettings ?? throw new ArgumentNullException(nameof(draftSettings));
+            _baselineSettings = liveSettings.DeepClone();
             _pages = pages ?? throw new ArgumentNullException(nameof(pages));
             _getCurrentPageKey = getCurrentPageKey ?? throw new ArgumentNullException(nameof(getCurrentPageKey));
             _getDpiScale = getDpiScale ?? throw new ArgumentNullException(nameof(getDpiScale));
@@ -76,7 +78,7 @@ namespace CS2TradeMonitor.src.UI
                 }
 
                 rollbackSettings = _liveSettings.DeepClone();
-                SettingsChanger.Merge(_liveSettings, _draftSettings);
+                SettingsChanger.MergeChangedProperties(_liveSettings, _draftSettings, _baselineSettings);
                 merged = true;
                 bool autoStartNeedsApply = SettingsFormApplyModel.ShouldApplyAutoStart(
                     oldAutoStart,
@@ -97,7 +99,8 @@ namespace CS2TradeMonitor.src.UI
                     _applyFormScaling();
                 }
 
-                SettingsChanger.RebaseDraftMonitorItems(_liveSettings, _draftSettings);
+                SettingsChanger.RebaseDraftFromLive(_liveSettings, _draftSettings);
+                _baselineSettings = _liveSettings.DeepClone();
                 _setSavedSnapshot(SettingsFormStateModel.CaptureSnapshot(_liveSettings));
                 _updateDirtyState(false);
                 _showSavedStatus();
@@ -107,20 +110,40 @@ namespace CS2TradeMonitor.src.UI
                 if (merged && !persisted && rollbackSettings != null)
                     SettingsChanger.Merge(_liveSettings, rollbackSettings);
 
-                DiagnosticsLogger.Error(
+                DiagnosticsLogger.ErrorEvent(
                     "Settings",
+                    "SettingsApplyFailed",
                     $"Apply settings failed. CurrentPage={_getCurrentPageKey()}; LoadedPages={string.Join(",", _pages.Keys)}",
+                    new Dictionary<string, object?>
+                    {
+                        ["operation"] = "ApplySettings",
+                        ["currentPage"] = _getCurrentPageKey(),
+                        ["loadedPageCount"] = _pages.Count,
+                        ["merged"] = merged,
+                        ["persisted"] = persisted
+                    },
                     ex);
                 throw;
             }
             finally
             {
                 stopwatch.Stop();
-                if (UiJankProfiler.Enabled || stopwatch.ElapsedMilliseconds >= 300)
+                if (SettingsFormApplyModel.ShouldLogCompletion(
+                        UiJankProfiler.VerboseLoggingEnabled,
+                        stopwatch.ElapsedMilliseconds))
                 {
-                    DiagnosticsLogger.Info(
+                    DiagnosticsLogger.InfoEvent(
                         "Settings",
-                        $"Apply settings completed. CurrentPage={_getCurrentPageKey()}; LoadedPages={_pages.Count}; ElapsedMs={stopwatch.ElapsedMilliseconds}");
+                        "SettingsApplySlow",
+                        $"Apply settings completed. CurrentPage={_getCurrentPageKey()}; LoadedPages={_pages.Count}; ElapsedMs={stopwatch.ElapsedMilliseconds}",
+                        new Dictionary<string, object?>
+                        {
+                            ["operation"] = "ApplySettings",
+                            ["currentPage"] = _getCurrentPageKey(),
+                            ["loadedPageCount"] = _pages.Count,
+                            ["elapsedMs"] = stopwatch.ElapsedMilliseconds,
+                            ["persisted"] = persisted
+                        });
                 }
             }
         }
@@ -163,6 +186,11 @@ namespace CS2TradeMonitor.src.UI
         public static bool ScaleChanged(double oldScale, double newScale)
         {
             return Math.Abs(oldScale - newScale) > 0.001;
+        }
+
+        public static bool ShouldLogCompletion(bool verboseProfilingEnabled, long elapsedMilliseconds)
+        {
+            return verboseProfilingEnabled || elapsedMilliseconds >= 300;
         }
     }
 }

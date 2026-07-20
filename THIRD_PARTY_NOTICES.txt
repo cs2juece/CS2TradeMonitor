@@ -43,6 +43,27 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
+Quant Research Module Reference Baselines
+-----------------------------------------
+
+The bundled CS2QuantWeb service does not embed third-party runtime code or
+assets. It uses the Microsoft .NET shared framework. Its feature scope and
+threshold baselines were studied from two historical local projects supplied
+by the project user:
+
+- stock-quant-cs2, Apache License 2.0. The C# strategy rules are a clean,
+  state-free reimplementation. No Python source, bytecode, environment, data,
+  UI, or trading wrapper is distributed.
+- chan-cs2, whose chan_py_src notice uses the MIT License and credits
+  Memos/Vespa314. CS2QuantWeb implements a smaller, independently maintained
+  structural model and does not claim full chan.py compatibility.
+
+CSQAQ is an optional external data adapter. Users remain responsible for their
+own API credentials, access tier, rate limits, IP binding, and applicable
+CSQAQ terms. Credentials are read only from the service process environment
+and are not stored by CS2QuantWeb.
+
+
 NuGet Dependency Inventory
 --------------------------
 

@@ -35,9 +35,16 @@ namespace CS2TradeMonitor.Application.YouPin
             return new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         }
 
-        public static void ApplyHeaders(HttpRequestMessage req, string token, string deviceToken, string uk = "", string deviceId = "")
+        public static void ApplyHeaders(
+            HttpRequestMessage req,
+            string token,
+            string deviceToken,
+            string uk = "",
+            string deviceId = "",
+            string appVersion = "")
         {
             var profile = GetProfile();
+            string effectiveAppVersion = FirstText(appVersion, AppVersion);
             string device = NormalizeDeviceIdentifier(deviceToken, profile.DeviceToken);
             string deviceIdValue = NormalizeDeviceIdentifier(deviceId, device);
             string requestTag = profile.RequestTag;
@@ -48,8 +55,8 @@ namespace CS2TradeMonitor.Application.YouPin
             req.Headers.TryAddWithoutValidation("authorization", string.IsNullOrWhiteSpace(token) ? "Bearer " : "Bearer " + token.Trim());
             if (!string.IsNullOrWhiteSpace(ukValue))
                 req.Headers.TryAddWithoutValidation("uk", ukValue);
-            req.Headers.TryAddWithoutValidation("user-agent", $"Android/{AndroidVersion} official com.uu898.uuhavequality/{AppVersion} okhttp/4.9.3");
-            req.Headers.TryAddWithoutValidation("App-Version", AppVersion);
+            req.Headers.TryAddWithoutValidation("user-agent", $"Android/{AndroidVersion} official com.uu898.uuhavequality/{effectiveAppVersion} okhttp/4.9.3");
+            req.Headers.TryAddWithoutValidation("App-Version", effectiveAppVersion);
             req.Headers.TryAddWithoutValidation("AppType", "4");
             req.Headers.TryAddWithoutValidation("deviceType", "1");
             req.Headers.TryAddWithoutValidation("package-type", "uuyp");
@@ -76,9 +83,18 @@ namespace CS2TradeMonitor.Application.YouPin
             }));
         }
 
-        public static void ApplyH5WebViewHeaders(HttpRequestMessage req, string uk = "", string userId = "", string deviceToken = "")
+        public static void ApplyH5WebViewHeaders(
+            HttpRequestMessage req,
+            string uk = "",
+            string userId = "",
+            string deviceToken = "",
+            string appVersion = "",
+            string webViewVersion = "148.0.7778.215")
         {
             var profile = GetProfile();
+            string effectiveAppVersion = FirstText(appVersion, AppVersion);
+            string effectiveWebViewVersion = FirstText(webViewVersion, "148.0.7778.215");
+            string effectiveWebViewMajorVersion = effectiveWebViewVersion.Split('.')[0];
             string ukValue = FirstText(uk, profile.Uk, profile.DeviceUk);
             string device = NormalizeDeviceIdentifier(deviceToken, profile.DeviceToken);
             string uid = (userId ?? "").Trim();
@@ -102,9 +118,11 @@ namespace CS2TradeMonitor.Application.YouPin
             }
 
             req.Headers.Remove("user-agent");
+            req.Headers.Remove("App-Version");
             req.Headers.TryAddWithoutValidation(
                 "user-agent",
-                $"Mozilla/5.0 (Linux; Android {AndroidVersion}; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/148.0.7778.215 Mobile Safari/537.36 {{\"package-type\":\"uuyp\"}} uuyp/appVersion={AppVersion}&uid={uid}&platform=Android&currentTheme=Dark&uk={ukValue}&deviceUk={profile.DeviceUk}&globalCache=false");
+                $"Mozilla/5.0 (Linux; Android {AndroidVersion}; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/{effectiveWebViewVersion} Mobile Safari/537.36 {{\"package-type\":\"uuyp\"}} uuyp/appVersion={effectiveAppVersion}&uid={uid}&platform=Android&currentTheme=Dark&uk={ukValue}&deviceUk={profile.DeviceUk}&globalCache=false");
+            req.Headers.TryAddWithoutValidation("App-Version", effectiveAppVersion);
             req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
             req.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7");
             req.Headers.TryAddWithoutValidation("appType", "4");
@@ -112,7 +130,7 @@ namespace CS2TradeMonitor.Application.YouPin
             req.Headers.TryAddWithoutValidation("Origin", YouPinUrls.HybridBase);
             req.Headers.TryAddWithoutValidation("Referer", YouPinUrls.HybridBaseWithSlash);
             req.Headers.TryAddWithoutValidation("X-Requested-With", "com.uu898.uuhavequality");
-            req.Headers.TryAddWithoutValidation("sec-ch-ua", "\"Chromium\";v=\"148\", \"Android WebView\";v=\"148\", \"Not/A)Brand\";v=\"99\"");
+            req.Headers.TryAddWithoutValidation("sec-ch-ua", $"\"Chromium\";v=\"{effectiveWebViewMajorVersion}\", \"Android WebView\";v=\"{effectiveWebViewMajorVersion}\", \"Not/A)Brand\";v=\"99\"");
             req.Headers.TryAddWithoutValidation("sec-ch-ua-mobile", "?1");
             req.Headers.TryAddWithoutValidation("sec-ch-ua-platform", "\"Android\"");
             req.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "empty");

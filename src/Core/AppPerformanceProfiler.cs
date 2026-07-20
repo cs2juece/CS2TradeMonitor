@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using CS2TradeMonitor.src.SystemServices;
@@ -26,7 +27,16 @@ namespace CS2TradeMonitor.src.Core
             if (!Enabled)
                 return;
 
-            DiagnosticsLogger.Info("Perf", $"{scope}; {detail}; Thread={Thread.CurrentThread.ManagedThreadId}");
+            DiagnosticsLogger.InfoEvent(
+                "Perf",
+                "PerformanceSample",
+                $"{scope}; {detail}; Thread={Thread.CurrentThread.ManagedThreadId}",
+                new Dictionary<string, object?>
+                {
+                    ["scope"] = scope,
+                    ["detail"] = detail,
+                    ["threadId"] = Thread.CurrentThread.ManagedThreadId
+                });
         }
 
         private static bool ResolveEnabled()
@@ -72,9 +82,18 @@ namespace CS2TradeMonitor.src.Core
                     return;
 
                 string suffix = string.IsNullOrWhiteSpace(_detail) ? string.Empty : "; " + _detail;
-                DiagnosticsLogger.Info(
+                DiagnosticsLogger.InfoEvent(
                     "Perf",
-                    $"{_scope}; ElapsedMs={_stopwatch.Elapsed.TotalMilliseconds:F2}{suffix}; Thread={Thread.CurrentThread.ManagedThreadId}");
+                    "SlowOperation",
+                    $"{_scope}; ElapsedMs={_stopwatch.Elapsed.TotalMilliseconds:F2}{suffix}; Thread={Thread.CurrentThread.ManagedThreadId}",
+                    new Dictionary<string, object?>
+                    {
+                        ["scope"] = _scope,
+                        ["detail"] = _detail,
+                        ["elapsedMs"] = _stopwatch.Elapsed.TotalMilliseconds,
+                        ["thresholdMs"] = _thresholdMs,
+                        ["threadId"] = Thread.CurrentThread.ManagedThreadId
+                    });
             }
         }
 

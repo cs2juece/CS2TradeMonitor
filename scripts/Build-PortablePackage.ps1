@@ -11,6 +11,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $projectDir = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).Path
 $projectFile = Join-Path $projectDir "CS2TradeMonitor.csproj"
+$quantWebProjectFile = Join-Path $projectDir "CS2QuantWeb\CS2QuantWeb.csproj"
 $bootstrapperProjectFile = Join-Path $projectDir "CS2TradeMonitor.Bootstrapper\CS2TradeMonitor.Bootstrapper.vcxproj"
 $bootstrapperPublishScript = Join-Path $projectDir "scripts\Publish-Bootstrapper.ps1"
 $updaterProjectFile = Join-Path $projectDir "CS2TradeMonitor.Updater\CS2TradeMonitor.Updater.csproj"
@@ -47,6 +48,7 @@ $packageName = "${appName}_v$version-$Runtime"
 $artifactsRoot = Join-Path $projectDir "bin\release-package"
 $stagingRoot = Join-Path $artifactsRoot "staging"
 $publishDir = Join-Path $stagingRoot $packageName
+$quantWebPublishDir = Join-Path $artifactsRoot "quant-web-publish"
 $bootstrapperPublishDir = Join-Path $artifactsRoot "bootstrapper-publish"
 $updaterPublishDir = Join-Path $artifactsRoot "updater-publish"
 $zipPath = Join-Path $artifactsRoot "$packageName.zip"
@@ -129,6 +131,16 @@ function Test-AllowedPackageFile {
         -or $rel -eq "resources/steamdt_items.json.gz" `
         -or $rel -eq "resources/lang/zh.json" `
         -or $rel -eq "resources/author-note.txt" `
+        -or $rel -eq "quant-web/CS2QuantWeb.exe" `
+        -or $rel -eq "quant-web/CS2QuantWeb.dll" `
+        -or $rel -eq "quant-web/CS2QuantWeb.Core.dll" `
+        -or $rel -eq "quant-web/CS2MarketData.Core.dll" `
+        -or $rel -eq "quant-web/CS2QuantWeb.deps.json" `
+        -or $rel -eq "quant-web/CS2QuantWeb.runtimeconfig.json" `
+        -or $rel -eq "quant-web/CS2QuantWeb.staticwebassets.endpoints.json" `
+        -or $rel -eq "quant-web/CS2QuantWeb.staticwebassets.runtime.json" `
+        -or $rel -eq "quant-web/appsettings.json" `
+        -or $rel -like "quant-web/wwwroot/*" `
         -or $rel -like "runtimes/*"
 }
 
@@ -195,7 +207,17 @@ function Assert-PackageFiles {
         "resources\api-help\steamdt-api-open.png",
         "resources\lang\zh.json",
         "resources\author-note.txt",
-        "resources\steamdt_items.json.gz"
+        "resources\steamdt_items.json.gz",
+        "quant-web\CS2QuantWeb.exe",
+        "quant-web\CS2QuantWeb.dll",
+        "quant-web\CS2QuantWeb.Core.dll",
+        "quant-web\CS2MarketData.Core.dll",
+        "quant-web\CS2QuantWeb.deps.json",
+        "quant-web\CS2QuantWeb.runtimeconfig.json",
+        "quant-web\appsettings.json",
+        "quant-web\wwwroot\index.html",
+        "quant-web\wwwroot\app.js",
+        "quant-web\wwwroot\app.css"
     )
 
     foreach ($required in $requiredFiles) {
@@ -265,7 +287,8 @@ function Write-ProgramFileManifest {
         "THIRD_PARTY_NOTICES.txt",
         "SteamDT_API_填写说明.txt",
         "docs/SteamDT_API_填写说明.txt",
-        "docs/使用说明(必读).txt"
+        "docs/使用说明(必读).txt",
+        "quant-web/data/sample.csv"
     )
     [ordered]@{ version = 1; files = $files; obsolete = $obsolete } |
         ConvertTo-Json -Depth 4 |
@@ -398,6 +421,21 @@ function Assert-ZipStructure {
         if ($names -notcontains "$TopDirectory/app/program-files.json") {
             throw "ZIP is missing app/program-files.json."
         }
+        foreach ($quantWebFile in @(
+            "CS2QuantWeb.exe",
+            "CS2QuantWeb.dll",
+            "CS2QuantWeb.Core.dll",
+            "CS2MarketData.Core.dll",
+            "CS2QuantWeb.deps.json",
+            "CS2QuantWeb.runtimeconfig.json",
+            "appsettings.json",
+            "wwwroot/index.html",
+            "wwwroot/app.js",
+            "wwwroot/app.css")) {
+            if ($names -notcontains "$TopDirectory/quant-web/$quantWebFile") {
+                throw "ZIP is missing quant-web/$quantWebFile."
+            }
+        }
         $forbiddenPaths = @($names | Where-Object {
             $_ -match '(^|/)(user-data|secure|logs|backup)(/|$)' `
                 -or $_ -match '(?i)\.(pdb|dmp|dump|har|download|tmp|bak|log|flag)$'
@@ -452,6 +490,7 @@ Get-ChildItem -LiteralPath $artifactsRoot -Filter "*.zip" -File -ErrorAction Sil
         Remove-PathSafe -Path $_.FullName -Root $artifactsRoot
     }
 Remove-PathSafe -Path $stagingRoot -Root $artifactsRoot
+Remove-PathSafe -Path $quantWebPublishDir -Root $artifactsRoot
 Remove-PathSafe -Path $bootstrapperPublishDir -Root $artifactsRoot
 Remove-PathSafe -Path $updaterPublishDir -Root $artifactsRoot
 Remove-PathSafe -Path $zipPath -Root $artifactsRoot
@@ -495,6 +534,34 @@ if (Test-Path -LiteralPath $publishedRuntimes -PathType Container) {
 $packagedAppDll = Join-Path $appPublishDir "$appName.dll"
 $packagedAppHost = Join-Path $appPublishDir "$appName.exe"
 
+dotnet publish $quantWebProjectFile `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained false `
+    -p:PublishSingleFile=false `
+    -p:UseAppHost=true `
+    -p:PublishReadyToRun=false `
+    -p:DebugType=none `
+    -p:DebugSymbols=false `
+    -p:IncludeSourceRevisionInInformationalVersion=false `
+    "-p:Version=$version" `
+    "-p:PublishDir=$quantWebPublishDir"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet publish quant research service failed with exit code $LASTEXITCODE."
+}
+
+foreach ($unneededQuantFile in @("appsettings.Development.json", "web.config")) {
+    $path = Join-Path $quantWebPublishDir $unneededQuantFile
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        Remove-Item -LiteralPath $path -Force
+    }
+}
+Get-ChildItem -LiteralPath $quantWebPublishDir -Include "*.pdb", "*.xml" -File -Recurse -ErrorAction SilentlyContinue |
+    Remove-Item -Force
+$quantWebPackageDir = Join-Path $publishDir "quant-web"
+Move-Item -LiteralPath $quantWebPublishDir -Destination $quantWebPackageDir
+
 & $bootstrapperPublishScript `
     -ProjectFile $bootstrapperProjectFile `
     -Configuration $Configuration `
@@ -528,6 +595,7 @@ if (!(Test-Path -LiteralPath $bootstrapperExe)) {
 }
 Assert-PublishedExecutableVersion -Path $packagedAppDll -Label "$appName app DLL"
 Assert-PublishedExecutableVersion -Path $packagedAppHost -Label "$appName app AppHost"
+Assert-PublishedExecutableVersion -Path (Join-Path $quantWebPackageDir "CS2QuantWeb.exe") -Label "CS2QuantWeb"
 Assert-PublishedExecutableVersion -Path $bootstrapperExe -Label $appName
 Assert-PublishedExecutableVersion -Path $updaterExe -Label "$appName.Updater"
 Copy-Item -LiteralPath $bootstrapperExe -Destination (Join-Path $publishDir "$appName.exe") -Force

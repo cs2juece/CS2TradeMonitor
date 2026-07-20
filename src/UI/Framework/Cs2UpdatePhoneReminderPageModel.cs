@@ -157,9 +157,10 @@ namespace CS2TradeMonitor.src.UI.Framework
             int gap = UIUtils.S(22);
             int y = 0;
 
-            var header = new Rectangle(0, y, width, UIUtils.S(70));
+            bool compact = width < UIUtils.S(760);
+            var header = new Rectangle(0, y, width, compact ? UIUtils.S(90) : UIUtils.S(70));
             y = header.Bottom + UIUtils.S(14);
-            var overview = new Rectangle(0, y, width, width < UIUtils.S(760) ? UIUtils.S(192) : UIUtils.S(106));
+            var overview = new Rectangle(0, y, width, compact ? UIUtils.S(192) : UIUtils.S(106));
             y = overview.Bottom + gap;
 
             bool twoColumn = width >= UIUtils.S(900);
@@ -180,7 +181,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 y = phoneCard.Bottom + gap;
             }
 
-            var flow = new Rectangle(0, y, width, width < UIUtils.S(760) ? UIUtils.S(126) : UIUtils.S(74));
+            var flow = new Rectangle(0, y, width, compact ? UIUtils.S(148) : UIUtils.S(74));
             y = flow.Bottom + gap;
 
             Rectangle history;

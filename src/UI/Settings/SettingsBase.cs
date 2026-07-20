@@ -27,6 +27,8 @@ namespace CS2TradeMonitor.src.UI.SettingsPage
         protected UIController UI = null!;
         public bool? LastAppliedThemeDarkMode { get; set; }
 
+        public event EventHandler? SettingsChanged;
+
         public static readonly Color GlobalBackColor = Color.FromArgb(249, 249, 249);
 
         public SettingsPageBase()
@@ -106,6 +108,11 @@ namespace CS2TradeMonitor.src.UI.SettingsPage
             // Immediate binding means we don't need to do anything here.
             // But we keep the method because ISettingsPage requires it.
             // Subclasses (like PluginPage) can override it for post-save logic.
+        }
+
+        protected void NotifySettingsChanged()
+        {
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
 
         protected override void Dispose(bool disposing)

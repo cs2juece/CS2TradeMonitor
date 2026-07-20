@@ -637,6 +637,7 @@ namespace CS2TradeMonitor.src.UI
                 {
                     var previousPalette = SettingsFormThemePalette.Capture();
                     _draftCfg.SettingsPanelDarkMode = !_draftCfg.SettingsPanelDarkMode;
+                    _uiTickCoordinator.NotifySettingsChanged();
                     UIColors.ApplySettingsTheme(_draftCfg.SettingsPanelDarkMode);
                     _latestThemeTransitionPalette = previousPalette;
                     _latestThemeTransitionDarkMode = _draftCfg.SettingsPanelDarkMode;
@@ -996,13 +997,13 @@ namespace CS2TradeMonitor.src.UI
             if (_applyingSettings || _switchingPage || IsDisposed || Disposing)
                 return false;
 
+            _applyingSettings = true;
             try
             {
                 _visiblePage?.Save();
                 if (!IsDraftDirty())
                     return false;
 
-                _applyingSettings = true;
                 _settingsApplyCoordinator.Apply(this);
                 return true;
             }
@@ -1052,6 +1053,7 @@ namespace CS2TradeMonitor.src.UI
             using (UiJankProfiler.Measure("Settings.CreatePage", $"Page={key}", thresholdMs: 1))
             {
                 page = CreateSettingsPage(key);
+                page.SettingsChanged += OnSettingsPageChanged;
                 page.AutoScaleMode = AutoScaleMode.None;
                 using (UiJankProfiler.Measure("Settings.PageSetContext", $"Page={key}", thresholdMs: 1))
                 {
@@ -1066,6 +1068,14 @@ namespace CS2TradeMonitor.src.UI
 
             _pages[key] = page;
             return page;
+        }
+
+        private void OnSettingsPageChanged(object? sender, EventArgs e)
+        {
+            if (_applyingSettings)
+                return;
+
+            _uiTickCoordinator.NotifySettingsChanged();
         }
 
         private SettingsPageBase CreateSettingsPage(string key)

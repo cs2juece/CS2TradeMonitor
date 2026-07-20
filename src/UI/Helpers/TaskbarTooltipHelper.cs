@@ -25,10 +25,12 @@ namespace CS2TradeMonitor.src.UI.Helpers
 
         // 悬停延迟机制
         private System.Windows.Forms.Timer? _hoverTimer;
+        private System.Windows.Forms.Timer? _pollingTimer;
 
         private bool _canShow = false;
         private int _cachedTargetWidth = 0; // 缓存计算后的宽度
         private const int HOVER_DELAY_MS = 400; // 400ms 延迟
+        private const int POLLING_INTERVAL_MS = 500;
         public TaskbarTooltipHelper(Form targetForm, Settings cfg, UIController ui)
         {
             _targetForm = targetForm;
@@ -56,6 +58,13 @@ namespace CS2TradeMonitor.src.UI.Helpers
             _hoverTimer?.Stop();
             _hoverTimer?.Dispose();
             _hoverTimer = null;
+            _pollingTimer?.Stop();
+            _pollingTimer?.Dispose();
+            _pollingTimer = null;
+            _tooltipForm?.Hide();
+            _isHovering = false;
+            _canShow = false;
+            _cachedTargetWidth = 0;
 
             // 重新初始化
             SetupMode();
@@ -76,15 +85,53 @@ namespace CS2TradeMonitor.src.UI.Helpers
                 _hoverTimer.Interval = HOVER_DELAY_MS;
                 _hoverTimer.Tick += OnHoverTimerTick;
 
-                _targetForm.MouseEnter += OnMouseEnter;
-                _targetForm.MouseLeave += OnMouseLeave;
-                _targetForm.MouseMove += OnMouseMove;
+                if (_cfg.TaskbarClickThrough)
+                {
+                    _pollingTimer = new System.Windows.Forms.Timer
+                    {
+                        Interval = POLLING_INTERVAL_MS
+                    };
+                    _pollingTimer.Tick += OnPollingTimerTick;
+                    _pollingTimer.Start();
+                }
+                else
+                {
+                    _targetForm.MouseEnter += OnMouseEnter;
+                    _targetForm.MouseLeave += OnMouseLeave;
+                    _targetForm.MouseMove += OnMouseMove;
+                }
             }
             else
             {
                 // 如果功能关闭，销毁窗体
                 _tooltipForm?.Dispose();
                 _tooltipForm = null;
+            }
+        }
+
+        private void OnPollingTimerTick(object? sender, EventArgs e)
+        {
+            if (_targetForm.IsDisposed || !_targetForm.IsHandleCreated)
+                return;
+
+            Rectangle screenBounds;
+            try
+            {
+                screenBounds = _targetForm.RectangleToScreen(_targetForm.ClientRectangle);
+            }
+            catch
+            {
+                return;
+            }
+
+            bool containsMouse = screenBounds.Contains(Cursor.Position);
+            if (containsMouse && !_isHovering)
+            {
+                OnMouseEnter(sender, e);
+            }
+            else if (!containsMouse && _isHovering)
+            {
+                OnMouseLeave(sender, e);
             }
         }
 
@@ -351,6 +398,9 @@ namespace CS2TradeMonitor.src.UI.Helpers
             _hoverTimer?.Stop();
             _hoverTimer?.Dispose();
             _hoverTimer = null;
+            _pollingTimer?.Stop();
+            _pollingTimer?.Dispose();
+            _pollingTimer = null;
 
             if (_tooltipForm != null)
             {

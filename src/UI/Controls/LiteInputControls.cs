@@ -20,6 +20,7 @@ namespace CS2TradeMonitor.src.UI.Controls
     public class LiteUnderlineInput : Panel
     {
         public TextBox Inner;
+        private readonly ImeAwareTextBox _imeAwareInner;
         private Label? _lblUnit;   // 单位 (右侧)
         private Label? _lblLabel;  // 标签 (左侧)
         private readonly Color? _customFontColor;
@@ -28,6 +29,14 @@ namespace CS2TradeMonitor.src.UI.Controls
         private const int EM_SETCUEBANNER = 0x1501;
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
         private static extern Int32 SendMessage(IntPtr hWnd, int msg, int wParam, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string lParam);
+
+        public bool IsImeComposing => _imeAwareInner.IsImeComposing;
+
+        public event EventHandler? ImeCompositionStarted;
+
+        public event EventHandler? ImeCompositionEnded;
+
+        public event EventHandler? CommittedTextChanged;
 
         public string Placeholder
         {
@@ -51,7 +60,7 @@ namespace CS2TradeMonitor.src.UI.Controls
             this.Cursor = Cursors.IBeam;
 
             // 1. 创建并添加输入框 (垫底)
-            Inner = new TextBox
+            _imeAwareInner = new ImeAwareTextBox
             {
                 Text = text,
                 BorderStyle = BorderStyle.None,
@@ -60,6 +69,18 @@ namespace CS2TradeMonitor.src.UI.Controls
                 Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
                 ForeColor = fontColor ?? UIColors.TextMain,
                 TextAlign = align
+            };
+            Inner = _imeAwareInner;
+            _imeAwareInner.CompositionStarted += (_, __) => ImeCompositionStarted?.Invoke(this, EventArgs.Empty);
+            _imeAwareInner.CompositionEnded += (_, __) =>
+            {
+                ImeCompositionEnded?.Invoke(this, EventArgs.Empty);
+                CommittedTextChanged?.Invoke(this, EventArgs.Empty);
+            };
+            _imeAwareInner.TextChanged += (_, __) =>
+            {
+                if (!IsImeComposing)
+                    CommittedTextChanged?.Invoke(this, EventArgs.Empty);
             };
             // this.Controls.Add(Inner); // Moved to end to ensure correct Dock order (Inner should be last Docked => Front of Z-Order)
 
@@ -111,6 +132,35 @@ namespace CS2TradeMonitor.src.UI.Controls
             // ★★★ Fix: Ensure Inner is at the top of Z-Order so it docks LAST (filling remaining space)
             // ensuring it respects the space taken by previously docked controls (Unit/Label)
             Inner.BringToFront();
+        }
+
+        private sealed class ImeAwareTextBox : TextBox
+        {
+            private const int WmImeStartComposition = 0x010D;
+            private const int WmImeEndComposition = 0x010E;
+
+            public bool IsImeComposing { get; private set; }
+
+            public event EventHandler? CompositionStarted;
+
+            public event EventHandler? CompositionEnded;
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WmImeStartComposition)
+                {
+                    IsImeComposing = true;
+                    CompositionStarted?.Invoke(this, EventArgs.Empty);
+                }
+
+                base.WndProc(ref m);
+
+                if (m.Msg == WmImeEndComposition)
+                {
+                    IsImeComposing = false;
+                    CompositionEnded?.Invoke(this, EventArgs.Empty);
+                }
+            }
         }
 
         public void SetTextColor(Color c) => Inner.ForeColor = c;
@@ -175,23 +225,48 @@ namespace CS2TradeMonitor.src.UI.Controls
     // =======================================================================
     public class LiteNumberInput : LiteUnderlineInput
     {
+        private readonly bool _allowNegative;
+        private bool _restoringText;
+        private string _lastAcceptedText;
+
         public LiteNumberInput(
             string text,
             string unit = "",
             string label = "",
             int width = 160,
             Color? color = null,
-            int maxLength = 10)
+            int maxLength = 10,
+            bool allowNegative = true)
             : base(text, unit, label, width, color, HorizontalAlignment.Center)
         {
+            _allowNegative = allowNegative;
+            _lastAcceptedText = IsValidEditText(text, allowNegative) ? text : string.Empty;
             this.Inner.MaxLength = maxLength;
 
             this.Inner.KeyPress += (s, e) =>
             {
                 if (char.IsControl(e.KeyChar) || char.IsDigit(e.KeyChar)) return;
                 if (e.KeyChar == '.' && !this.Inner.Text.Contains(".")) return;
-                if (e.KeyChar == '-' && this.Inner.SelectionStart == 0 && !this.Inner.Text.Contains("-")) return;
+                if (e.KeyChar == '-' && _allowNegative && this.Inner.SelectionStart == 0 && !this.Inner.Text.Contains("-")) return;
                 e.Handled = true;
+            };
+
+            this.Inner.TextChanged += (s, e) =>
+            {
+                if (_allowNegative || _restoringText)
+                    return;
+
+                if (IsValidEditText(this.Inner.Text, allowNegative: false))
+                {
+                    _lastAcceptedText = this.Inner.Text;
+                    return;
+                }
+
+                int selectionStart = Math.Min(this.Inner.SelectionStart, _lastAcceptedText.Length);
+                _restoringText = true;
+                this.Inner.Text = _lastAcceptedText;
+                this.Inner.SelectionStart = selectionStart;
+                _restoringText = false;
             };
 
             this.Inner.Leave += (s, e) =>
@@ -201,6 +276,31 @@ namespace CS2TradeMonitor.src.UI.Controls
                     this.Inner.Text = "0";
                 }
             };
+        }
+
+        internal static bool IsValidEditText(string? text, bool allowNegative)
+        {
+            string value = text ?? string.Empty;
+            bool decimalPointSeen = false;
+            for (int index = 0; index < value.Length; index++)
+            {
+                char current = value[index];
+                if (char.IsDigit(current))
+                    continue;
+
+                if (current == '.' && !decimalPointSeen)
+                {
+                    decimalPointSeen = true;
+                    continue;
+                }
+
+                if (current == '-' && allowNegative && index == 0)
+                    continue;
+
+                return false;
+            }
+
+            return true;
         }
 
         public int ValueInt => int.TryParse(Inner.Text, out int v) ? v : 0;

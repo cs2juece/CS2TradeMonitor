@@ -2,6 +2,7 @@ using System.Linq;
 using CS2TradeMonitor.src.Core;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Text.Json;
 namespace CS2TradeMonitor.src.Core.Actions
 {
     /// <summary>
@@ -11,6 +12,15 @@ namespace CS2TradeMonitor.src.Core.Actions
     /// </summary>
     public static class SettingsChanger
     {
+        private static readonly HashSet<string> RuntimeProperties = new(StringComparer.Ordinal)
+        {
+            "LastAutoNetwork", "LastAutoDisk",
+            "ScreenDevice", "MaxLimitTipShown",
+            "TotalUpload", "TotalDownload",
+            "SessionUploadBytes", "SessionDownloadBytes",
+            "LastAutoSaveTime", "LastAlertTime"
+        };
+
         /// <summary>
         /// 使用反射将草稿设置 (Draft) 合并到实时设置 (Live) 中。
         /// 保留在黑名单中定义的仅运行时属性。
@@ -19,78 +29,106 @@ namespace CS2TradeMonitor.src.Core.Actions
         {
             if (live == null || draft == null) return;
 
-            // 不应被草稿覆盖的属性黑名单 (运行时数据)
-            //这些值由后台逻辑自动更新。如果不在黑名单中，当你打开设置窗口时（Draft 状态）它们可能已经发生了变化
-            var runtimeProps = new HashSet<string>
-            {
-
-                // 其他运行时状态
-                "LastAutoNetwork", "LastAutoDisk",
-                "ScreenDevice", "MaxLimitTipShown",
-
-                // 流量统计 (累加值)
-                "TotalUpload", "TotalDownload",
-                "SessionUploadBytes", "SessionDownloadBytes",
-
-                // 时间戳
-                "LastAutoSaveTime", "LastAlertTime"
-            };
-
             var props = typeof(Settings).GetProperties(BindingFlags.Public | BindingFlags.Instance);
             foreach (var p in props)
             {
                 if (!p.CanWrite || !p.CanRead) continue;
 
                 // 1. 跳过黑名单中的运行时属性
-                if (runtimeProps.Contains(p.Name)) continue;
+                if (RuntimeProperties.Contains(p.Name)) continue;
 
-                // 2. 特殊处理集合类型
-                if (p.Name == "MonitorItems")
-                {
-                    UpdateMonitorList(live, draft.MonitorItems, draft.HorizontalFollowsTaskbar);
-                    continue;
-                }
-                if (p.Name == "Thresholds")
-                {
-                    // 阈值是 Class 类型 (ThresholdsSet)，必须深拷贝
-                    var json = System.Text.Json.JsonSerializer.Serialize(draft.Thresholds);
-                    live.Thresholds = System.Text.Json.JsonSerializer.Deserialize<ThresholdsSet>(json) ?? new ThresholdsSet();
-                    continue;
-                }
-                if (p.Name == "ItemConfigs")
-                {
-                    var json = System.Text.Json.JsonSerializer.Serialize(draft.ItemConfigs);
-                    live.ItemConfigs = System.Text.Json.JsonSerializer.Deserialize<List<ItemMonitorConfig>>(json)
-                                            ?? new List<ItemMonitorConfig>();
-                    SyncItemConfigsToMonitorItems(live);
-                    continue;
-                }
-                if (p.Name == "MarketAlertRules")
-                {
-                    var json = System.Text.Json.JsonSerializer.Serialize(draft.MarketAlertRules);
-                    live.MarketAlertRules = System.Text.Json.JsonSerializer.Deserialize<List<MarketAlertRule>>(json)
-                                            ?? new List<MarketAlertRule>();
-                    continue;
-                }
-                if (p.Name == "PhoneAlertChannels")
-                {
-                    var json = System.Text.Json.JsonSerializer.Serialize(draft.PhoneAlertChannels);
-                    live.PhoneAlertChannels = System.Text.Json.JsonSerializer.Deserialize<List<PhoneAlertChannelConfig>>(json)
-                                             ?? new List<PhoneAlertChannelConfig>();
-                    continue;
-                }
-                // 3. 特殊处理字典类型
-                if (p.Name == "GroupAliases")
-                {
-                    live.GroupAliases = new Dictionary<string, string>(draft.GroupAliases);
-                    continue;
-                }
-
-                // 3. 默认：直接复制
-                // 处理所有 bool, int, string, enum 等类型
-                var val = p.GetValue(draft);
-                p.SetValue(live, val);
+                ApplyProperty(live, draft, p);
             }
+        }
+
+        public static void MergeChangedProperties(Settings live, Settings draft, Settings baseline)
+        {
+            ArgumentNullException.ThrowIfNull(live);
+            ArgumentNullException.ThrowIfNull(draft);
+            ArgumentNullException.ThrowIfNull(baseline);
+
+            var properties = typeof(Settings).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            foreach (PropertyInfo property in properties)
+            {
+                if (!property.CanWrite || !property.CanRead || RuntimeProperties.Contains(property.Name))
+                    continue;
+                if (PropertyValuesEqual(property, draft, baseline))
+                    continue;
+
+                ApplyProperty(live, draft, property);
+            }
+        }
+
+        public static void RebaseDraftFromLive(Settings live, Settings draft)
+        {
+            ArgumentNullException.ThrowIfNull(live);
+            ArgumentNullException.ThrowIfNull(draft);
+
+            Settings clone = live.DeepClone();
+            foreach (PropertyInfo property in typeof(Settings).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (property.CanWrite && property.CanRead)
+                    property.SetValue(draft, property.GetValue(clone));
+            }
+
+            RebaseDraftMonitorItems(live, draft);
+        }
+
+        private static bool PropertyValuesEqual(PropertyInfo property, Settings left, Settings right)
+        {
+            object? leftValue = property.GetValue(left);
+            object? rightValue = property.GetValue(right);
+            if (ReferenceEquals(leftValue, rightValue))
+                return true;
+            if (leftValue is null || rightValue is null)
+                return false;
+            if (property.PropertyType.IsValueType || property.PropertyType == typeof(string))
+                return Equals(leftValue, rightValue);
+
+            string leftJson = JsonSerializer.Serialize(leftValue, property.PropertyType);
+            string rightJson = JsonSerializer.Serialize(rightValue, property.PropertyType);
+            return string.Equals(leftJson, rightJson, StringComparison.Ordinal);
+        }
+
+        private static void ApplyProperty(Settings live, Settings draft, PropertyInfo property)
+        {
+            if (property.Name == nameof(Settings.MonitorItems))
+            {
+                UpdateMonitorList(live, draft.MonitorItems, draft.HorizontalFollowsTaskbar);
+                return;
+            }
+            if (property.Name == nameof(Settings.Thresholds))
+            {
+                string json = JsonSerializer.Serialize(draft.Thresholds);
+                live.Thresholds = JsonSerializer.Deserialize<ThresholdsSet>(json) ?? new ThresholdsSet();
+                return;
+            }
+            if (property.Name == nameof(Settings.ItemConfigs))
+            {
+                string json = JsonSerializer.Serialize(draft.ItemConfigs);
+                live.ItemConfigs = JsonSerializer.Deserialize<List<ItemMonitorConfig>>(json) ?? [];
+                SyncItemConfigsToMonitorItems(live);
+                return;
+            }
+            if (property.Name == nameof(Settings.MarketAlertRules))
+            {
+                string json = JsonSerializer.Serialize(draft.MarketAlertRules);
+                live.MarketAlertRules = JsonSerializer.Deserialize<List<MarketAlertRule>>(json) ?? [];
+                return;
+            }
+            if (property.Name == nameof(Settings.PhoneAlertChannels))
+            {
+                string json = JsonSerializer.Serialize(draft.PhoneAlertChannels);
+                live.PhoneAlertChannels = JsonSerializer.Deserialize<List<PhoneAlertChannelConfig>>(json) ?? [];
+                return;
+            }
+            if (property.Name == nameof(Settings.GroupAliases))
+            {
+                live.GroupAliases = new Dictionary<string, string>(draft.GroupAliases);
+                return;
+            }
+
+            property.SetValue(live, property.GetValue(draft));
         }
 
         /// <summary>

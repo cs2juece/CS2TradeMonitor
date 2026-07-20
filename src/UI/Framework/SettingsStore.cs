@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using CS2TradeMonitor.Infrastructure.Diagnostics;
 
 namespace CS2TradeMonitor.src.UI.Framework
@@ -10,6 +11,7 @@ namespace CS2TradeMonitor.src.UI.Framework
     public sealed class SettingsStore
     {
         private readonly Dictionary<string, object?> _draft = new Dictionary<string, object?>();
+        private readonly HashSet<string> _changedKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly Action<IReadOnlyDictionary<string, object?>> _saveSnapshot;
         private int _bulkLoadDepth;
         private long _version;
@@ -26,6 +28,8 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public IReadOnlyDictionary<string, object?> Snapshot => new Dictionary<string, object?>(_draft);
 
+        internal IReadOnlyCollection<string> ChangedKeys => new List<string>(_changedKeys);
+
         public bool HasUnsavedChanges => _version != _savedVersion;
 
         public void BeginBulkLoad()
@@ -39,7 +43,10 @@ namespace CS2TradeMonitor.src.UI.Framework
                 _bulkLoadDepth--;
 
             if (markClean && _bulkLoadDepth == 0)
+            {
                 _savedVersion = _version;
+                _changedKeys.Clear();
+            }
         }
 
         public T Get<T>(string key, T fallback = default!)
@@ -61,15 +68,40 @@ namespace CS2TradeMonitor.src.UI.Framework
                 throw new ArgumentException("Setting key is required.", nameof(key));
             }
 
-            if (!forceChanged && _draft.TryGetValue(key, out object? current) && Equals(current, value))
+            if (!forceChanged && _draft.TryGetValue(key, out object? current) && ValuesEquivalent(current, value))
                 return;
 
             _draft[key] = value;
             _version++;
+            _changedKeys.Add(key);
             if (_bulkLoadDepth == 0)
             {
                 RecordSafeSettingChange(key, value);
                 DraftChanged?.Invoke(this, new SettingChangedEventArgs(key, value));
+            }
+        }
+
+        private static bool ValuesEquivalent(object? current, object? value)
+        {
+            if (Equals(current, value))
+                return true;
+            if (current is null || value is null || current.GetType() != value.GetType())
+                return false;
+
+            Type type = current.GetType();
+            if (type.IsValueType || current is string)
+                return false;
+
+            try
+            {
+                return string.Equals(
+                    JsonSerializer.Serialize(current, type),
+                    JsonSerializer.Serialize(value, type),
+                    StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -80,6 +112,7 @@ namespace CS2TradeMonitor.src.UI.Framework
 
             _saveSnapshot(Snapshot);
             _savedVersion = _version;
+            _changedKeys.Clear();
             Saved?.Invoke(this, EventArgs.Empty);
         }
 

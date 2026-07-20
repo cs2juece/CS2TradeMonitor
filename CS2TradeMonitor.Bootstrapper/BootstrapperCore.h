@@ -12,4 +12,6 @@ namespace bootstrapper
     bool IsDownloadStalled(std::uint64_t nowMilliseconds, std::uint64_t lastProgressMilliseconds,
         std::uint64_t timeoutMilliseconds);
     bool ShouldOfferApplicationEntry(bool setupFinished, bool setupSucceeded);
+    bool IsAuthorNoteShown(const std::wstring& installRoot, const std::wstring& userStateSubKey);
+    bool MarkAuthorNoteShown(const std::wstring& installRoot, const std::wstring& userStateSubKey);
 }

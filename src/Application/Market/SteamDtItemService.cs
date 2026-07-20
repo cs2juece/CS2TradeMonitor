@@ -15,6 +15,7 @@ using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core.Refresh;
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Domain.Market;
+using CS2MarketData.Core;
 
 namespace CS2TradeMonitor.Application.Market
 {
@@ -27,6 +28,7 @@ namespace CS2TradeMonitor.Application.Market
         public static SteamDtItemService Instance => _instance ??= new SteamDtItemService();
 
         private readonly HttpClient _http;
+        private readonly SteamDtKlineClient _klineClient;
         private readonly JsonSerializerOptions _jsonOptions;
         private readonly ConcurrentDictionary<string, SteamDtItemData> _cache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, DateTime> _lastFetchTime = new(StringComparer.OrdinalIgnoreCase);
@@ -46,7 +48,7 @@ namespace CS2TradeMonitor.Application.Market
         private string? _cacheFilePath;
 
         // Local items database cache
-        private List<SteamDtSearchCandidate>? _localItemsCache;
+        private SteamDtItemCatalog? _localItemCatalog;
         private readonly object _localCacheLock = new();
 
         public event Action? DataUpdated;
@@ -58,8 +60,8 @@ namespace CS2TradeMonitor.Application.Market
             {
                 lock (_localCacheLock)
                 {
-                    if (_localItemsCache != null)
-                        return _localItemsCache.Count > 0;
+                    if (_localItemCatalog != null)
+                        return _localItemCatalog.Count > 0;
                 }
 
                 return !string.IsNullOrWhiteSpace(GetLocalItemsFilePath());
@@ -76,6 +78,7 @@ namespace CS2TradeMonitor.Application.Market
             if (httpFactory == null) throw new ArgumentNullException(nameof(httpFactory));
 
             _http = httpFactory.Create(15, new Uri(SteamDtUrls.OpenApiBase));
+            _klineClient = new SteamDtKlineClient(_http);
             _http.DefaultRequestHeaders.Add("User-Agent", "CS2TradeMonitor/1.0 (Windows; .NET)");
             _jsonOptions = ServiceInfra.DefaultJsonOptions;
 
@@ -196,7 +199,7 @@ namespace CS2TradeMonitor.Application.Market
             foreach (var item in itemsToFetch)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                bool success = await FetchItemPriceAsync(item, persistSettings: false);
+                bool success = await FetchItemPriceAsync(item);
                 if (success)
                 {
                     anyUpdated = true;

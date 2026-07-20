@@ -9,6 +9,8 @@ namespace CS2TradeMonitor.Application.Abstractions
 
         void Configure(Settings settings);
 
+        void SetBackgroundRefreshConsumer(string consumerKey, TimeSpan? refreshInterval);
+
         YouPinInventoryState GetState();
 
         YouPinStopProfitLossState GetStopProfitLossState();

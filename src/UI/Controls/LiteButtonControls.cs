@@ -200,6 +200,8 @@ namespace CS2TradeMonitor.src.UI.Controls
         private bool _hover;
         private bool _pressed;
         private bool _isActive;
+        private Color? _fillColorOverride;
+        private bool _showKeyboardFocusCue;
 
         public LiteButton(string t, bool p = false, bool dashed = false)
         {
@@ -219,6 +221,32 @@ namespace CS2TradeMonitor.src.UI.Controls
         public bool IsPrimary => _primary;
 
         public Color? BorderColorOverride { get; set; }
+
+        public Color? FillColorOverride
+        {
+            get => _fillColorOverride;
+            set
+            {
+                if (_fillColorOverride == value)
+                    return;
+
+                _fillColorOverride = value;
+                Invalidate();
+            }
+        }
+
+        public bool ShowKeyboardFocusCue
+        {
+            get => _showKeyboardFocusCue;
+            set
+            {
+                if (_showKeyboardFocusCue == value)
+                    return;
+
+                _showKeyboardFocusCue = value;
+                Invalidate();
+            }
+        }
 
         public bool IsActive
         {
@@ -282,28 +310,62 @@ namespace CS2TradeMonitor.src.UI.Controls
         protected override void OnMouseUp(MouseEventArgs mevent)
         {
             base.OnMouseUp(mevent);
+            if (IsDisposed || Disposing)
+                return;
+
             _pressed = false;
             Invalidate();
         }
 
         protected override void OnClick(EventArgs e)
         {
+            string? operationId = null;
             if (DetailedDiagnosticsRuntime.IsEnabled)
             {
-                string action = string.IsNullOrWhiteSpace(AccessibleName) ? Text : AccessibleName;
-                if (action.Length > 80)
-                    action = action[..80];
+                operationId = Guid.NewGuid().ToString("N");
+                string actionId = ResolveDiagnosticActionId();
                 DetailedDiagnosticsRuntime.Record(
                     "Information",
                     "UI",
                     "ButtonAction",
                     new Dictionary<string, object?>
                     {
-                        ["action"] = action,
-                        ["controlType"] = GetType().Name
-                    });
+                        ["actionId"] = actionId,
+                        ["controlType"] = GetType().Name,
+                        ["pageId"] = FindDiagnosticPageId(),
+                        ["activationSource"] = "Click"
+                    },
+                    operationId);
             }
+            using IDisposable? scope = operationId is null
+                ? null
+                : DetailedDiagnosticOperationContext.Begin(operationId);
             base.OnClick(e);
+        }
+
+        private string ResolveDiagnosticActionId()
+        {
+            if (!string.IsNullOrWhiteSpace(Name))
+                return Name.Length <= 80 ? Name : Name[..80];
+            if (!string.IsNullOrWhiteSpace(AccessibleName))
+                return AccessibleName.Length <= 80 ? AccessibleName : AccessibleName[..80];
+            string display = Text ?? string.Empty;
+            return DetailedDiagnosticsRuntime.Current?.Correlate("uiAction", display)
+                ?? GetType().Name;
+        }
+
+        private string FindDiagnosticPageId()
+        {
+            for (Control? current = Parent; current is not null; current = current.Parent)
+            {
+                string typeName = current.GetType().Name;
+                if (typeName.EndsWith("Page", StringComparison.Ordinal)
+                    || typeName.EndsWith("Form", StringComparison.Ordinal))
+                {
+                    return typeName;
+                }
+            }
+            return FindForm()?.GetType().Name ?? "UnknownPage";
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -343,6 +405,12 @@ namespace CS2TradeMonitor.src.UI.Controls
                 using var innerPen = new Pen(Color.FromArgb(50, border), 1F) { DashStyle = DashStyle.Dash };
                 e.Graphics.DrawRectangle(innerPen, 2, 2, Math.Max(1, Width - 5), Math.Max(1, Height - 5));
             }
+
+            if (_showKeyboardFocusCue && Focused && ShowFocusCues)
+            {
+                Rectangle focusRect = Rectangle.Inflate(rect, -UIUtils.S(3), -UIUtils.S(3));
+                ControlPaint.DrawFocusRectangle(e.Graphics, focusRect);
+            }
         }
 
         protected override void OnEnabledChanged(EventArgs e)
@@ -352,11 +420,30 @@ namespace CS2TradeMonitor.src.UI.Controls
             Invalidate();
         }
 
+        protected override void OnGotFocus(EventArgs e)
+        {
+            base.OnGotFocus(e);
+            Invalidate();
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            base.OnLostFocus(e);
+            Invalidate();
+        }
+
         private Color ResolveFillColor()
         {
             if (!Enabled) return UIColors.ControlDisabledBg;
             if (_primary || _isActive)
             {
+                if (_fillColorOverride.HasValue)
+                {
+                    Color fill = _fillColorOverride.Value;
+                    if (_pressed) return ControlPaint.Dark(fill, 0.12F);
+                    if (_hover) return ControlPaint.Dark(fill, 0.04F);
+                    return fill;
+                }
                 if (_pressed) return UIColors.IsDark ? Color.FromArgb(0, 103, 205) : Color.FromArgb(0, 100, 190);
                 if (_hover) return UIColors.IsDark ? Color.FromArgb(24, 144, 255) : Color.FromArgb(0, 132, 235);
                 return UIColors.Primary;
@@ -371,6 +458,7 @@ namespace CS2TradeMonitor.src.UI.Controls
         {
             if (!Enabled) return UIColors.Border;
             if (BorderColorOverride.HasValue) return BorderColorOverride.Value;
+            if ((_primary || _isActive) && _fillColorOverride.HasValue) return _fillColorOverride.Value;
             if (_primary || _isActive) return UIColors.Primary;
             if (_hover || Focused) return UIColors.Primary;
             return UIColors.Border;

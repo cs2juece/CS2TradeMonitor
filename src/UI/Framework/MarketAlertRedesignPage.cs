@@ -202,21 +202,29 @@ namespace CS2TradeMonitor.src.UI.Framework
             card.Layout += (_, __) =>
             {
                 int pad = UIUtils.S(20);
+                bool compact = card.Width < UIUtils.S(760);
+                int desiredHeight = compact ? UIUtils.S(224) : UIUtils.S(172);
+                if (card.Height != desiredHeight)
+                    card.Height = desiredHeight;
+
                 title.SetBounds(pad, UIUtils.S(14), UIUtils.S(180), UIUtils.S(28));
                 divider.SetBounds(pad, UIUtils.S(50), Math.Max(1, card.Width - pad * 2), 1);
                 int y = UIUtils.S(72);
                 globalLabel.SetBounds(pad, y, UIUtils.S(70), UIUtils.S(30));
                 enabledSwitch.SetBounds(globalLabel.Right + UIUtils.S(16), y, UIUtils.S(58), UIUtils.S(30));
-                modeLabel.SetBounds(enabledSwitch.Right + UIUtils.S(48), y, UIUtils.S(74), UIUtils.S(30));
+                modeLabel.SetBounds(enabledSwitch.Right + UIUtils.S(compact ? 30 : 48), y, UIUtils.S(74), UIUtils.S(30));
                 modeCombo.SetBounds(modeLabel.Right + UIUtils.S(12), y - UIUtils.S(1), UIUtils.S(212), UIUtils.S(34));
-                deferLabel.SetBounds(modeCombo.Right + UIUtils.S(34), y, UIUtils.S(156), UIUtils.S(30));
-                deferSwitch.SetBounds(deferLabel.Right + UIUtils.S(10), y, UIUtils.S(58), UIUtils.S(30));
-                int y2 = UIUtils.S(112);
+                int deferY = compact ? UIUtils.S(112) : y;
+                int deferX = compact ? pad : modeCombo.Right + UIUtils.S(34);
+                deferLabel.SetBounds(deferX, deferY, UIUtils.S(156), UIUtils.S(30));
+                deferSwitch.SetBounds(deferLabel.Right + UIUtils.S(10), deferY, UIUtils.S(58), UIUtils.S(30));
+
+                int y2 = compact ? UIUtils.S(152) : UIUtils.S(112);
                 windowLabel.SetBounds(pad, y2, UIUtils.S(106), UIUtils.S(30));
                 windowInput.SetBounds(windowLabel.Right + UIUtils.S(10), y2 - UIUtils.S(1), UIUtils.S(88), UIUtils.S(34));
                 cooldownLabel.SetBounds(windowInput.Right + UIUtils.S(34), y2, UIUtils.S(100), UIUtils.S(30));
                 cooldownInput.SetBounds(cooldownLabel.Right + UIUtils.S(10), y2 - UIUtils.S(1), UIUtils.S(88), UIUtils.S(34));
-                note.SetBounds(pad, UIUtils.S(146), Math.Max(1, card.Width - pad * 2), UIUtils.S(22));
+                note.SetBounds(pad, compact ? UIUtils.S(194) : UIUtils.S(146), Math.Max(1, card.Width - pad * 2), UIUtils.S(22));
             };
             return card;
         }
@@ -739,7 +747,7 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         private void EnsureBuiltinRules()
         {
-            if (MarketAlertPageModel.EnsureBuiltinRules(Rules, Settings.CreateDefaultMarketAlertRules()))
+            if (MarketAlertRuleCatalog.EnsureBuiltinRules(Rules))
                 SaveRules();
         }
 
@@ -1154,6 +1162,9 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public void SetText(string text, Color textColor)
         {
+            if (string.Equals(Text, text, StringComparison.Ordinal) && _textColor == textColor)
+                return;
+
             Text = text;
             _textColor = textColor;
             Invalidate();

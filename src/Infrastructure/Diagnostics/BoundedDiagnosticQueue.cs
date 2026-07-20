@@ -10,6 +10,9 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
 
     internal sealed record DetailedDiagnosticEnvelope(
         string SessionId,
+        string ProcessRunId,
+        string? InstallationCorrelation,
+        long Sequence,
         DateTime TimestampUtc,
         string Level,
         string Module,
@@ -30,6 +33,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
         private long _droppedNormal;
         private int _pendingCount;
         private int _inFlightCount;
+        private int _peakPendingCount;
 
         public BoundedDiagnosticQueue(int capacity)
         {
@@ -62,6 +66,19 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
 
         public long DroppedCount => Interlocked.Read(ref _droppedCritical) + Interlocked.Read(ref _droppedNormal);
 
+        public long DroppedCriticalCount => Interlocked.Read(ref _droppedCritical);
+
+        public long DroppedNormalCount => Interlocked.Read(ref _droppedNormal);
+
+        public int PeakPendingCount
+        {
+            get
+            {
+                lock (_stateSync)
+                    return _peakPendingCount;
+            }
+        }
+
         public bool TryEnqueue(DetailedDiagnosticEnvelope envelope)
         {
             ChannelWriter<DetailedDiagnosticEnvelope> writer = envelope.Priority == DetailedDiagnosticPriority.Critical
@@ -79,6 +96,7 @@ namespace CS2TradeMonitor.Infrastructure.Diagnostics
                 }
 
                 _pendingCount++;
+                _peakPendingCount = Math.Max(_peakPendingCount, _pendingCount);
             }
 
             _signal.Release();

@@ -10,11 +10,13 @@ namespace CS2TradeMonitor.src.Core.Actions
         private AppActionRuntimeServices(
             IYouPinInventoryService youPinInventory,
             IYouPinSaleReminderService youPinSaleReminders,
+            IYouPinGridTradingService youPinGridTrading,
             IMarketAlertService marketAlerts,
             IRenderScheduler renderScheduler)
         {
             YouPinInventory = youPinInventory ?? throw new ArgumentNullException(nameof(youPinInventory));
             YouPinSaleReminders = youPinSaleReminders ?? throw new ArgumentNullException(nameof(youPinSaleReminders));
+            YouPinGridTrading = youPinGridTrading ?? throw new ArgumentNullException(nameof(youPinGridTrading));
             MarketAlerts = marketAlerts ?? throw new ArgumentNullException(nameof(marketAlerts));
             RenderScheduler = renderScheduler ?? throw new ArgumentNullException(nameof(renderScheduler));
         }
@@ -22,6 +24,8 @@ namespace CS2TradeMonitor.src.Core.Actions
         public IYouPinInventoryService YouPinInventory { get; }
 
         public IYouPinSaleReminderService YouPinSaleReminders { get; }
+
+        public IYouPinGridTradingService YouPinGridTrading { get; }
 
         public IMarketAlertService MarketAlerts { get; }
 
@@ -39,6 +43,7 @@ namespace CS2TradeMonitor.src.Core.Actions
             return new AppActionRuntimeServices(
                 provider.GetRequiredService<IYouPinInventoryService>(),
                 provider.GetRequiredService<IYouPinSaleReminderService>(),
+                provider.GetRequiredService<IYouPinGridTradingService>(),
                 provider.GetRequiredService<IMarketAlertService>(),
                 provider.GetRequiredService<IRenderScheduler>());
         }
