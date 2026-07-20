@@ -1,0 +1,25 @@
+{
+  "version": "1.36",
+  "releaseDate": "2026-07-20T13:16:40Z",
+  "changelog": "- 新增本机量化研究服务，支持饰品 K 线、均线、MACD、精简缠论及信号导出。\n- 新增悠悠库存仓和交易网格，支持观察预演及受保护的自动执行。\n- 新增按监控饰品配置的电脑/手机提醒。\n- 新增可配置的自动更新检查。\n- 优化高 DPI、任务栏、输入与周期刷新稳定性。",
+  "minSupportedVersion": "1.0",
+  "assets": {
+    "winX64": {
+      "url": "https://gitee.com/cs2juece/CS2TradeMonitor/releases/download/v1.36/CS2TradeMonitor_v1.36-win-x64.zip",
+      "urls": [
+        {
+          "name": "Gitee 国内",
+          "priority": 1,
+          "url": "https://gitee.com/cs2juece/CS2TradeMonitor/releases/download/v1.36/CS2TradeMonitor_v1.36-win-x64.zip"
+        },
+        {
+          "name": "GitHub 官方",
+          "priority": 2,
+          "url": "https://github.com/cs2juece/CS2TradeMonitor/releases/download/v1.36/CS2TradeMonitor_v1.36-win-x64.zip"
+        }
+      ],
+      "sha256": "1a05579fdc2babf3aea5b77fabac5b61586a2d3b660eced57d80ee4ca07bb749",
+      "sizeBytes": 4139817
+    }
+  }
+}
