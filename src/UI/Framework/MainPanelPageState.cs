@@ -178,13 +178,15 @@ namespace CS2TradeMonitor.src.UI.Framework
         public const int Percent = 1 << 3;
         public const int Source = 1 << 4;
         public const int RefreshTime = 1 << 5;
+        public const int YouPinBid = 1 << 6;
         public const int Default = Name | Price;
-        public const int All = Name | Price | Change | Percent | Source | RefreshTime;
+        public const int All = Name | Price | Change | Percent | Source | RefreshTime | YouPinBid;
 
         public static IReadOnlyList<ItemMonitorDisplayFieldOption> Options { get; } = new[]
         {
             new ItemMonitorDisplayFieldOption("名称", Name),
             new ItemMonitorDisplayFieldOption("价格", Price),
+            new ItemMonitorDisplayFieldOption("悠悠求购", YouPinBid),
             new ItemMonitorDisplayFieldOption("涨跌", Change),
             new ItemMonitorDisplayFieldOption("涨跌幅", Percent),
             new ItemMonitorDisplayFieldOption("来源", Source),

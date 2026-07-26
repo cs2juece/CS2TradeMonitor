@@ -61,11 +61,9 @@ namespace CS2TradeMonitor.src.UI.Framework
         private LiteButton? _openHelpButton;
         private Label? _sendHealthLabel;
 
-        private Label? _readStrategyLabel;
-        private Label? _latestTitleLabel;
-        private Label? _latestTimeLabel;
-        private Label? _lastCheckHistoryLabel;
-        private Label? _lastCheckIntervalLabel;
+        private readonly Label[] _recentUpdateTitleLabels = new Label[10];
+        private readonly Label[] _recentUpdateMetaLabels = new Label[10];
+        private Label? _historyContextLabel;
 
         private Label? _backupEnabledLabel;
         private LiteButton? _manageBackupButton;
@@ -415,51 +413,45 @@ namespace CS2TradeMonitor.src.UI.Framework
         private YouPinCcRoundedPanel CreateHistoryCard()
         {
             var card = CreateCard();
-            var title = CreateTextLabel("历史记录与读取策略", 11F, FontStyle.Bold, UIColors.TextMain);
+            var title = CreateTextLabel("最近 10 条 CS2 更新", 11F, FontStyle.Bold, UIColors.TextMain);
             var source = new StatusPillLabel { Width = UIUtils.S(78), Height = UIUtils.S(24) };
             source.Apply("公开来源", Cs2UpdatePhoneReminderTone.Primary);
-            var readCaption = CreateTextLabel("读取策略", 8.5F, FontStyle.Bold, UIColors.TextSub);
-            _readStrategyLabel = CreateTextLabel("", 9F, FontStyle.Regular, UIColors.TextMain);
-            var latestCaption = CreateTextLabel("最新记录", 8.5F, FontStyle.Bold, UIColors.TextSub);
-            _latestTitleLabel = CreateTextLabel("", 9F, FontStyle.Bold, UIColors.TextMain);
-            _latestTimeLabel = CreateTextLabel("", 8.5F, FontStyle.Regular, UIColors.TextSub);
-            var checkCaption = CreateTextLabel("上次检查", 8.5F, FontStyle.Bold, UIColors.TextSub);
-            _lastCheckHistoryLabel = CreateTextLabel("", 9F, FontStyle.Regular, UIColors.TextMain);
-            _lastCheckIntervalLabel = CreateTextLabel("", 8.5F, FontStyle.Regular, UIColors.TextSub);
+            _historyContextLabel = CreateTextLabel(string.Empty, 8F, FontStyle.Regular, UIColors.TextSub);
 
             card.Controls.Add(title);
             card.Controls.Add(source);
-            card.Controls.Add(readCaption);
-            card.Controls.Add(_readStrategyLabel);
-            card.Controls.Add(latestCaption);
-            card.Controls.Add(_latestTitleLabel);
-            card.Controls.Add(_latestTimeLabel);
-            card.Controls.Add(checkCaption);
-            card.Controls.Add(_lastCheckHistoryLabel);
-            card.Controls.Add(_lastCheckIntervalLabel);
+            card.Controls.Add(_historyContextLabel);
+            for (int i = 0; i < _recentUpdateTitleLabels.Length; i++)
+            {
+                _recentUpdateTitleLabels[i] = CreateTextLabel("", 8.8F, FontStyle.Bold, UIColors.TextMain);
+                _recentUpdateMetaLabels[i] = CreateTextLabel("", 8F, FontStyle.Regular, UIColors.TextSub);
+                card.Controls.Add(_recentUpdateTitleLabels[i]);
+                card.Controls.Add(_recentUpdateMetaLabels[i]);
+            }
             card.Layout += (_, __) =>
             {
                 int pad = UIUtils.S(22);
-                title.SetBounds(pad, UIUtils.S(22), UIUtils.S(180), UIUtils.S(28));
+                title.SetBounds(pad, UIUtils.S(22), UIUtils.S(220), UIUtils.S(28));
                 source.SetBounds(title.Right + UIUtils.S(10), UIUtils.S(24), source.Width, source.Height);
-                int captionW = UIUtils.S(112);
-                int y = UIUtils.S(74);
-                readCaption.SetBounds(pad, y, captionW, UIUtils.S(28));
-                _readStrategyLabel.SetBounds(pad + captionW + UIUtils.S(10), y, Math.Max(1, card.Width - pad * 2 - captionW - UIUtils.S(10)), UIUtils.S(28));
-                y += UIUtils.S(56);
-                latestCaption.SetBounds(pad, y, captionW, UIUtils.S(28));
-                _latestTitleLabel.SetBounds(pad + captionW + UIUtils.S(10), y - UIUtils.S(2), Math.Max(1, card.Width - pad * 2 - captionW - UIUtils.S(10)), UIUtils.S(24));
-                _latestTimeLabel.SetBounds(pad + captionW + UIUtils.S(10), y + UIUtils.S(22), Math.Max(1, card.Width - pad * 2 - captionW - UIUtils.S(10)), UIUtils.S(22));
-                y += UIUtils.S(58);
-                checkCaption.SetBounds(pad, y, captionW, UIUtils.S(28));
-                _lastCheckHistoryLabel.SetBounds(pad + captionW + UIUtils.S(10), y, UIUtils.S(200), UIUtils.S(28));
-                _lastCheckIntervalLabel.SetBounds(pad + captionW + UIUtils.S(230), y, Math.Max(1, card.Width - pad * 2 - captionW - UIUtils.S(230)), UIUtils.S(28));
+                _historyContextLabel.SetBounds(pad, UIUtils.S(52), Math.Max(1, card.Width - pad * 2), UIUtils.S(22));
+                int y = UIUtils.S(80);
+                int rowHeight = UIUtils.S(44);
+                for (int i = 0; i < _recentUpdateTitleLabels.Length; i++)
+                {
+                    _recentUpdateTitleLabels[i].SetBounds(pad, y, Math.Max(1, card.Width - pad * 2), UIUtils.S(23));
+                    _recentUpdateMetaLabels[i].SetBounds(pad, y + UIUtils.S(21), Math.Max(1, card.Width - pad * 2), UIUtils.S(19));
+                    y += rowHeight;
+                }
             };
             card.Paint += (_, e) =>
             {
-                PaintCardDivider(e.Graphics, card.Width, UIUtils.S(56));
-                PaintCardDivider(e.Graphics, card.Width, UIUtils.S(116));
-                PaintCardDivider(e.Graphics, card.Width, UIUtils.S(172));
+                PaintCardDivider(e.Graphics, card.Width, UIUtils.S(76));
+                int y = UIUtils.S(122);
+                for (int i = 1; i < _recentUpdateTitleLabels.Length; i++)
+                {
+                    PaintCardDivider(e.Graphics, card.Width, y);
+                    y += UIUtils.S(44);
+                }
             };
             return card;
         }
@@ -655,20 +647,38 @@ namespace CS2TradeMonitor.src.UI.Framework
                 _sendHealthLabel.Text = view.SendHealth;
                 _sendHealthLabel.ForeColor = Cs2UpdatePhoneReminderPageModel.ResolveToneColor(view.SendHealthTone);
             }
-            if (_readStrategyLabel != null)
-                _readStrategyLabel.Text = view.ReadStrategy;
-            if (_latestTitleLabel != null)
-                _latestTitleLabel.Text = view.LatestTitle;
-            if (_latestTimeLabel != null)
-                _latestTimeLabel.Text = view.LatestTime;
-            if (_lastCheckHistoryLabel != null)
-                _lastCheckHistoryLabel.Text = view.LastCheck.Value.Text;
-            if (_lastCheckIntervalLabel != null)
-                _lastCheckIntervalLabel.Text = view.LastCheck.Detail;
+            if (_historyContextLabel != null)
+                _historyContextLabel.Text = $"{view.ReadStrategy} · {view.LastCheck.Value.Text} · {view.LastCheck.Detail}";
             if (_backupEnabledLabel != null)
                 _backupEnabledLabel.Text = $"{view.EnabledBackupCount} / {view.TotalBackupCount}";
 
+            ApplyRecentUpdates(_updateReminder.RecentItems);
+
             _statusRenderer.ApplyChannelStatus(server, PhoneAlertPagePresenter.BuildChannelStatus(server, serverConfigured, _phoneAlerts.MaskSecret(server)));
+        }
+
+        private void ApplyRecentUpdates(IReadOnlyList<Cs2UpdateLogItem> items)
+        {
+            Cs2UpdateLogItem[] recent = items
+                .OrderByDescending(item => item.PublishedAt)
+                .Take(_recentUpdateTitleLabels.Length)
+                .ToArray();
+            for (int i = 0; i < _recentUpdateTitleLabels.Length; i++)
+            {
+                if (i >= recent.Length)
+                {
+                    _recentUpdateTitleLabels[i].Text = i == 0 ? "暂无更新记录" : string.Empty;
+                    _recentUpdateMetaLabels[i].Text = string.Empty;
+                    continue;
+                }
+
+                Cs2UpdateLogItem item = recent[i];
+                _recentUpdateTitleLabels[i].Text = string.IsNullOrWhiteSpace(item.Title)
+                    ? "CS2 更新记录"
+                    : item.Title.Trim();
+                _recentUpdateMetaLabels[i].Text =
+                    $"{Cs2UpdateReminderService.FormatTime(item.PublishedAt)} · {item.Source}";
+            }
         }
 
         private void ApplyOverviewBlock(int index, Cs2UpdatePhoneReminderStatusBlock block)

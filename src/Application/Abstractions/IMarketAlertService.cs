@@ -1,4 +1,5 @@
 using CS2TradeMonitor.src.Core;
+using CS2TradeMonitor.Application.Monitoring;
 using CS2TradeMonitor.src.SystemServices;
 
 namespace CS2TradeMonitor.Application.Abstractions
@@ -10,5 +11,7 @@ namespace CS2TradeMonitor.Application.Abstractions
         void ApplySettings(Settings cfg);
 
         void Evaluate(Settings cfg);
+
+        AlertReadinessSnapshot GetReadiness(Settings cfg);
     }
 }

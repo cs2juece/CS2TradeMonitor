@@ -1,5 +1,6 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Notify;
+using CS2TradeMonitor.Application.Monitoring;
 using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.SystemServices.InfoService;
@@ -20,6 +21,7 @@ namespace CS2TradeMonitor
         private readonly ICs2UpdateReminderService _cs2UpdateReminder;
         private readonly IMarketAlertService _marketAlerts;
         private readonly IPhoneAlertDispatchService _phoneAlerts;
+        private readonly IAlertHistoryStore _alertHistory;
         private readonly IRenderScheduler _renderScheduler;
         private readonly IInfoService _infoService;
         private const int BackgroundRefreshIntervalMs = 1000;
@@ -67,6 +69,7 @@ namespace CS2TradeMonitor
             _cs2UpdateReminder = runtimeServices.Cs2UpdateReminder;
             _marketAlerts = runtimeServices.MarketAlerts;
             _phoneAlerts = runtimeServices.PhoneAlerts;
+            _alertHistory = runtimeServices.AlertHistory;
             _renderScheduler = runtimeServices.RenderScheduler;
             _infoService = runtimeServices.InfoService;
 
@@ -678,7 +681,11 @@ namespace CS2TradeMonitor
             if (_form.IsDisposed || _disposed)
                 return;
 
-            _ = PhoneAlertNotificationDelivery.SendIfRequestedAsync(_cfg, _phoneAlerts, e);
+            bool trackHistory = AlertHistorySources.IsAppNotificationSource(e.Source);
+            if (e.SendToPhone && trackHistory)
+                _ = DeliverPhoneAndRecordAsync(e);
+            else
+                _ = PhoneAlertNotificationDelivery.SendIfRequestedAsync(_cfg, _phoneAlerts, e);
 
             void ShowLocal()
             {
@@ -686,9 +693,10 @@ namespace CS2TradeMonitor
                     return;
 
                 bool doNotDisturb = _cfg.DoNotDisturbEnabled;
+                bool delivered = false;
                 if (e.ShowToast)
                 {
-                    GlobalPromptService.Notify(
+                    delivered = GlobalPromptService.Notify(
                         e.Title,
                         e.Message,
                         GlobalPromptService.MapSeverity(e.Severity),
@@ -701,7 +709,26 @@ namespace CS2TradeMonitor
 
                 if (e.PlaySound && !doNotDisturb)
                 {
-                    try { System.Media.SystemSounds.Exclamation.Play(); } catch (System.Exception ex) { CS2TradeMonitor.src.SystemServices.DiagnosticsLogger.Ignored(ex); }
+                    try
+                    {
+                        System.Media.SystemSounds.Exclamation.Play();
+                        delivered = true;
+                    }
+                    catch (System.Exception ex)
+                    {
+                        CS2TradeMonitor.src.SystemServices.DiagnosticsLogger.Ignored(ex);
+                    }
+                }
+
+                if (trackHistory)
+                {
+                    AppendAlertHistory(
+                        e.Source!,
+                        e.Title,
+                        e.Message,
+                        "本机",
+                        delivered ? AlertDeliveryStatus.Succeeded : AlertDeliveryStatus.Skipped,
+                        delivered ? "本机提醒已投递" : "当前规则未请求本机提醒或通知已去重");
                 }
             }
 
@@ -718,12 +745,22 @@ namespace CS2TradeMonitor
         private void OnCs2UpdateDetected(object? sender, Cs2UpdateDetectedEventArgs e)
         {
             if (_form.IsDisposed) return;
-            if (_cfg.DoNotDisturbEnabled) return;
+            if (_cfg.DoNotDisturbEnabled)
+            {
+                AppendAlertHistory(
+                    AlertHistorySources.Cs2Update,
+                    e.Title,
+                    e.Message,
+                    "本机",
+                    AlertDeliveryStatus.Skipped,
+                    "勿扰模式已启用");
+                return;
+            }
 
             void ShowLocal()
             {
                 if (_form.IsDisposed) return;
-                GlobalPromptService.Notify(
+                bool shown = GlobalPromptService.Notify(
                     e.Title,
                     e.Message,
                     GlobalPromptKind.Info,
@@ -735,6 +772,14 @@ namespace CS2TradeMonitor
                 {
                     try { System.Media.SystemSounds.Exclamation.Play(); } catch (System.Exception ex) { CS2TradeMonitor.src.SystemServices.DiagnosticsLogger.Ignored(ex); }
                 }
+
+                AppendAlertHistory(
+                    AlertHistorySources.Cs2Update,
+                    e.Title,
+                    e.Message,
+                    "本机",
+                    shown ? AlertDeliveryStatus.Succeeded : AlertDeliveryStatus.Skipped,
+                    shown ? "本机提醒已投递" : "通知已去重或未显示");
             }
 
             if (_form.InvokeRequired)
@@ -753,11 +798,25 @@ namespace CS2TradeMonitor
             {
                 try
                 {
-                    await _phoneAlerts.SendConfiguredAsync(_cfg, e.Title, e.Message).ConfigureAwait(false);
+                    var result = await _phoneAlerts.SendConfiguredAsync(_cfg, e.Title, e.Message).ConfigureAwait(false);
+                    AppendAlertHistory(
+                        AlertHistorySources.Cs2Update,
+                        e.Title,
+                        e.Message,
+                        "手机",
+                        MapDeliveryStatus(result),
+                        result.Message);
                 }
                 catch
                 {
                     // Phone push records expected failures; update checks must keep running.
+                    AppendAlertHistory(
+                        AlertHistorySources.Cs2Update,
+                        e.Title,
+                        e.Message,
+                        "手机",
+                        AlertDeliveryStatus.Failed,
+                        "手机提醒发送失败");
                 }
             });
         }
@@ -770,7 +829,28 @@ namespace CS2TradeMonitor
             {
                 if (_form is MainForm mainForm && !mainForm.IsDisposed)
                 {
-                    return MarketAlertNotificationDispatcher.Show(cfg, mainForm, _phoneAlerts, title, message, icon);
+                    bool shown = MarketAlertNotificationDispatcher.Show(
+                        cfg,
+                        mainForm,
+                        _phoneAlerts,
+                        title,
+                        message,
+                        icon,
+                        phoneResult => AppendAlertHistory(
+                            AlertHistorySources.Market,
+                            title,
+                            message,
+                            "手机",
+                            MapDeliveryStatus(phoneResult),
+                            phoneResult.Message));
+                    AppendAlertHistory(
+                        AlertHistorySources.Market,
+                        title,
+                        message,
+                        "本机",
+                        shown ? AlertDeliveryStatus.Succeeded : AlertDeliveryStatus.Skipped,
+                        shown ? "本机提醒已投递" : "勿扰模式、通知去重或窗口不可用");
+                    return shown;
                 }
 
                 return false;
@@ -793,5 +873,62 @@ namespace CS2TradeMonitor
                 return Show();
             }
         }
+
+        private async System.Threading.Tasks.Task DeliverPhoneAndRecordAsync(AppNotificationEventArgs notification)
+        {
+            var result = await PhoneAlertNotificationDelivery
+                .SendIfRequestedAsync(_cfg, _phoneAlerts, notification)
+                .ConfigureAwait(false);
+            AppendAlertHistory(
+                notification.Source!,
+                notification.Title,
+                notification.Message,
+                "手机",
+                MapDeliveryStatus(result),
+                result.Message);
+        }
+
+        private void AppendAlertHistory(
+            string source,
+            string title,
+            string summary,
+            string channel,
+            AlertDeliveryStatus status,
+            string detail)
+        {
+            try
+            {
+                _ = _alertHistory.AppendAsync(new AlertHistoryEntry
+                {
+                    OccurredAt = DateTimeOffset.Now,
+                    Source = source,
+                    EventType = "提醒触发",
+                    Title = title,
+                    Summary = summary,
+                    Channel = channel,
+                    Status = status,
+                    Detail = detail
+                });
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.Ignored(
+                    "AlertHistory",
+                    "QueueAppend",
+                    ex,
+                    retryable: true,
+                    category: "Storage");
+            }
+        }
+
+        private static AlertDeliveryStatus MapDeliveryStatus(PhoneAlertSendResult result)
+        {
+            return result.Success
+                ? AlertDeliveryStatus.Succeeded
+                : result.Skipped
+                    ? AlertDeliveryStatus.Skipped
+                    : AlertDeliveryStatus.Failed;
+        }
+
     }
 }

@@ -77,10 +77,13 @@ namespace CS2TradeMonitor.src.Core.State
         bool VisibleInTaskbar,
         int RefreshIntervalSec,
         double LastPrice,
+        double LastYouPinBidPrice,
         double LastChange,
         double LastChangeRatio,
         long LastUpdateTime,
+        long LastYouPinBidUpdateTime,
         string LastStatus,
+        string LastYouPinBidStatus,
         bool HasChangeData);
 
     public sealed record NotificationConfigSnapshot(

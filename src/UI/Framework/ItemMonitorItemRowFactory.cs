@@ -183,6 +183,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             };
             AddFlagCheck(panel, item, "名称", ItemMonitorPageModel.FieldName, commitItemConfigs);
             AddFlagCheck(panel, item, "价格", ItemMonitorPageModel.FieldPrice, commitItemConfigs);
+            AddFlagCheck(panel, item, "悠悠求购", ItemMonitorPageModel.FieldYouPinBid, commitItemConfigs);
             AddFlagCheck(panel, item, "涨跌", ItemMonitorPageModel.FieldChange, commitItemConfigs);
             AddFlagCheck(panel, item, "涨跌幅", ItemMonitorPageModel.FieldPercent, commitItemConfigs);
             AddFlagCheck(panel, item, "来源", ItemMonitorPageModel.FieldSource, commitItemConfigs);

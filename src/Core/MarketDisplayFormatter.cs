@@ -122,6 +122,8 @@ namespace CS2TradeMonitor.src.Core
             string itemLookupId = itemId;
             string shortName = "";
             int flags = 0;
+            double persistedYouPinBidPrice = 0;
+            string persistedYouPinBidStatus = "";
 
             if (settings != null)
             {
@@ -131,6 +133,8 @@ namespace CS2TradeMonitor.src.Core
                 itemLookupId = item?.ItemId ?? itemId;
                 shortName = item?.ShortName ?? "";
                 flags = item?.DisplayFieldFlags ?? 0;
+                persistedYouPinBidPrice = item?.LastYouPinBidPrice ?? 0;
+                persistedYouPinBidStatus = item?.LastYouPinBidStatus ?? "";
             }
             else
             {
@@ -140,6 +144,8 @@ namespace CS2TradeMonitor.src.Core
                 itemLookupId = item?.ItemId ?? itemId;
                 shortName = item?.ShortName ?? "";
                 flags = item?.DisplayFieldFlags ?? 0;
+                persistedYouPinBidPrice = item?.LastYouPinBidPrice ?? 0;
+                persistedYouPinBidStatus = item?.LastYouPinBidStatus ?? "";
             }
 
             if (flags == 0) flags = (1 << 0) | (1 << 1);
@@ -147,9 +153,26 @@ namespace CS2TradeMonitor.src.Core
             string label = (flags & (1 << 0)) != 0
                 ? (!string.IsNullOrWhiteSpace(shortName) ? shortName : snapshot.Label)
                 : "";
+            var latest = SteamDtItems.GetItemData(itemLookupId);
+            double youPinBidPrice = latest?.YouPinBidPrice > 0
+                ? latest.YouPinBidPrice
+                : persistedYouPinBidPrice;
+            string youPinBidStatus = latest?.YouPinBidPrice > 0
+                ? latest.YouPinBidStatus
+                : persistedYouPinBidStatus;
 
             if (!snapshot.HasData)
             {
+                if ((flags & (1 << 6)) != 0 && youPinBidPrice > 0)
+                {
+                    return new MarketDisplaySegments
+                    {
+                        Label = label,
+                        HasData = true,
+                        IndexText = FormatYouPinBid(youPinBidPrice, youPinBidStatus)
+                    };
+                }
+
                 return new MarketDisplaySegments
                 {
                     Label = label,
@@ -158,12 +181,13 @@ namespace CS2TradeMonitor.src.Core
                 };
             }
 
-            var latest = SteamDtItems.GetItemData(itemLookupId);
             var secondaryParts = new List<string>();
             string primary = "";
 
             if ((flags & (1 << 1)) != 0)
                 primary = "¥" + FormatIndex(snapshot.Index);
+            if ((flags & (1 << 6)) != 0)
+                secondaryParts.Add(FormatYouPinBid(youPinBidPrice, youPinBidStatus));
             if ((flags & (1 << 2)) != 0 && snapshot.HasChangeData)
                 secondaryParts.Add(FormatSignedChange(snapshot.Change));
             if ((flags & (1 << 3)) != 0 && snapshot.HasChangeData)
@@ -186,6 +210,18 @@ namespace CS2TradeMonitor.src.Core
                 IndexText = primary,
                 PercentText = string.Join("  ", secondaryParts)
             };
+        }
+
+        internal static string FormatYouPinBid(double price, string? status)
+        {
+            if (price <= 0)
+                return "悠购 --";
+
+            string text = "悠购 ¥" + FormatIndex(price);
+            return !string.IsNullOrWhiteSpace(status)
+                && status.Contains("缓存", StringComparison.OrdinalIgnoreCase)
+                    ? text + " 缓存"
+                    : text;
         }
 
         public static string GetValueText(string key, Settings? settings = null, bool triggerFetch = false)

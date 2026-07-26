@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="data:,">
   <title>CS2 量化研究台</title>
   <link rel="stylesheet" href="/app.css">
 </head>
@@ -56,11 +57,60 @@
         <button class="primary-button" id="analyzeButton" type="submit">开始分析</button>
         <a class="secondary-button disabled" id="exportLink" href="#" aria-disabled="true">导出信号 CSV</a>
       </form>
+      <details class="cost-settings" id="costSettings">
+        <summary>交易成本参数（可选）</summary>
+        <div class="cost-input-grid">
+          <label>
+            <span>卖出平台手续费（%）</span>
+            <input id="platformFeeInput" type="number" min="0" max="50" step="0.01" placeholder="未配置">
+          </label>
+          <label>
+            <span>买卖总价差（bps）</span>
+            <input id="spreadBpsInput" type="number" min="0" max="5000" step="1" placeholder="未观测">
+          </label>
+          <label>
+            <span>单边滑点（bps）</span>
+            <input id="slippageBpsInput" type="number" min="0" max="5000" step="1" placeholder="未配置">
+          </label>
+          <p>留空不会伪装成真实成本：系统会明确标记缺失项，并同时计算基准、成本翻倍和低流动性情景。</p>
+        </div>
+      </details>
+      <div class="research-profile-bar" aria-label="研究配置">
+        <div>
+          <span>研究配置</span>
+          <strong id="profileSummary">MA(5,10,20) · MACD(12,26,9) · 默认研究策略</strong>
+        </div>
+        <button class="secondary-button" id="indicatorSettingsButton" type="button">指标设置</button>
+        <button class="secondary-button" id="strategySettingsButton" type="button">策略设置</button>
+      </div>
       <div class="message hidden" id="message" role="alert"></div>
     </section>
 
     <section id="workspace" class="workspace" aria-busy="false" hidden>
       <div class="summary-grid" id="summaryGrid" aria-label="核心指标"></div>
+
+      <article class="card result-summary-card" aria-live="polite">
+        <div class="card-header">
+          <div>
+            <span class="section-kicker">结果摘要</span>
+            <h2>策略回测概览</h2>
+          </div>
+          <span class="method-badge neutral">只读汇总 · 不作为门禁</span>
+        </div>
+        <p id="resultSummaryStatus" class="result-summary-status"></p>
+        <div id="resultSummaryGrid" class="result-summary-grid"></div>
+        <p class="card-note">收益展示当前最佳策略的已实现与未实现复合净收益；胜率按已平仓交易数加权，持有时间按交易及未平仓仓位加权，成本压力值取全部成本情景中的最低结果。</p>
+      </article>
+
+      <section id="qualityPanel" class="quality-panel" aria-live="polite">
+        <strong id="qualityTitle">数据质量检查</strong>
+        <div id="qualityDetails"></div>
+      </section>
+
+      <section id="executionCostPanel" class="cost-profile-panel" aria-live="polite">
+        <strong id="executionCostTitle">执行成本检查</strong>
+        <div id="executionCostDetails"></div>
+      </section>
 
       <article class="card chart-card">
         <div class="card-header chart-header">
@@ -69,29 +119,44 @@
             <h2 id="seriesTitle"></h2>
             <p id="seriesMeta"></p>
           </div>
-          <label class="range-control">
-            <span>显示范围</span>
-            <select id="rangeSelect">
-              <option value="30" selected>30 天</option>
-              <option value="60">60 天</option>
-              <option value="90">90 天</option>
-              <option value="180">半年</option>
-              <option value="365">一年</option>
-              <option value="730">两年</option>
-              <option value="all">全部</option>
-            </select>
-          </label>
+          <div class="chart-header-controls">
+            <label class="lock-toggle" title="开启后，策略回测中的卖出必须等买入满 7 天后才能执行。">
+              <span>T+7</span>
+              <input id="tPlusSevenToggle" type="checkbox" role="switch">
+              <i aria-hidden="true"></i>
+            </label>
+            <button class="chart-control-button" id="chartIndicatorButton" type="button">指标</button>
+            <button class="chart-control-button" id="chartStrategyButton" type="button">策略</button>
+            <label class="range-control">
+              <span>显示范围</span>
+              <select id="rangeSelect">
+                <option value="30" selected>30 天</option>
+                <option value="60">60 天</option>
+                <option value="90">90 天</option>
+                <option value="180">半年</option>
+                <option value="365">一年</option>
+                <option value="730">两年</option>
+                <option value="all">全部</option>
+              </select>
+            </label>
+          </div>
         </div>
-        <div class="legend" aria-label="图例">
-          <span><i class="legend-line ma5"></i>MA5</span>
-          <span><i class="legend-line ma10"></i>MA10</span>
-          <span><i class="legend-line ma20"></i>MA20</span>
+        <div class="legend" id="chartLegend" aria-label="图例">
           <span><i class="legend-line stroke"></i>缠论笔</span>
+          <span><i class="legend-line segment"></i>线段</span>
           <span><i class="legend-box center"></i>中枢</span>
+          <span><i class="legend-dot fractal"></i>分型</span>
+          <span><i class="legend-badge signal">买</i>研究信号</span>
         </div>
-        <div class="chart-wrap">
-          <canvas id="marketChart" role="img" aria-label="K 线、均线、缠论笔和 MACD 图"></canvas>
-          <div id="chartTooltip" class="chart-tooltip" hidden></div>
+        <div class="chart-toolbar" aria-label="图表操作">
+          <span>滚轮缩放 · 拖动浏览 · 十字光标复核</span>
+          <div>
+            <button id="chartResetButton" type="button">回到最新</button>
+            <button id="chartFullscreenButton" type="button">全屏图表</button>
+          </div>
+        </div>
+        <div class="chart-wrap" id="chartWrap">
+          <div id="marketChart" role="img" aria-label="可缩放的 K 线、均线、分型、笔、线段、中枢、研究信号和 MACD 图"></div>
         </div>
       </article>
 
@@ -100,7 +165,7 @@
           <div class="card-header">
             <div>
               <span class="section-kicker">结构摘要</span>
-              <h2>精简缠论</h2>
+              <h2>缠论结构与买卖点</h2>
             </div>
             <span class="method-badge">候选信号</span>
           </div>
@@ -111,15 +176,28 @@
         <article class="card">
           <div class="card-header">
             <div>
-              <span class="section-kicker">轻量验证</span>
-              <h2>信号回看</h2>
+              <span class="section-kicker">执行复核</span>
+              <h2 id="backtestTitle">普通执行回测</h2>
             </div>
             <span class="method-badge neutral">无账户状态</span>
           </div>
           <div id="backtestGrid" class="backtest-grid"></div>
-          <p class="card-note">买入信号与后续首个卖出信号配对，只用于规则回看；不模拟资金、仓位和订单。</p>
+          <p class="card-note" id="backtestNote">信号在下一根 K 线开盘执行；T+7 默认关闭。已计点差、滑点和卖出方平台手续费；手续费未配置时按 0 计算并明确标注，样本结束不强制平仓。</p>
         </article>
       </div>
+
+      <article class="card walk-forward-card">
+        <div class="card-header">
+          <div>
+            <span class="section-kicker">样本外门禁</span>
+            <h2>共同日历滚动验证</h2>
+          </div>
+          <span class="method-badge neutral">固定规则 · 未自动调参</span>
+        </div>
+        <p id="walkForwardStatus" class="walk-forward-status"></p>
+        <div id="walkForwardGrid" class="walk-forward-grid"></div>
+        <p class="card-note">所有策略共用相同日期边界；训练段随窗口扩展，验证段和测试段只使用其对应日历区间。少于 180 根 K 线或形成交易的窗口不足时，结果为“不可判定”。</p>
+      </article>
 
       <article class="card signals-card">
         <div class="card-header signals-header">
@@ -168,6 +246,64 @@
     </section>
   </main>
 
+  <dialog class="settings-dialog indicator-dialog" id="indicatorDialog" aria-labelledby="indicatorDialogTitle">
+    <form method="dialog" class="dialog-shell">
+      <header>
+        <div><span class="section-kicker">图表与策略共用</span><h2 id="indicatorDialogTitle">指标</h2></div>
+        <button class="dialog-close" value="cancel">关闭</button>
+      </header>
+      <p class="dialog-intro">主图和副图使用同一份服务端计算结果。最多同时启用 12 个指标。</p>
+      <div class="indicator-columns">
+        <section><h3>主图指标</h3><div id="mainIndicatorList" class="indicator-list"></div></section>
+        <section><h3>副图指标</h3><div id="subIndicatorList" class="indicator-list"></div></section>
+      </div>
+      <footer>
+        <span id="indicatorSelectionCount">已选择 0 / 12</span>
+        <div><button class="secondary-button" value="cancel">取消</button><button class="primary-button" id="saveIndicatorsButton" value="default">确定</button></div>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog class="settings-dialog parameter-dialog" id="parameterDialog" aria-labelledby="parameterDialogTitle">
+    <form method="dialog" class="dialog-shell">
+      <header><h2 id="parameterDialogTitle">指标参数</h2><button class="dialog-close" value="cancel">关闭</button></header>
+      <div id="parameterFields" class="parameter-fields"></div>
+      <footer><span id="parameterHint"></span><div><button class="secondary-button" value="cancel">取消</button><button class="primary-button" id="saveParametersButton" value="default">确定</button></div></footer>
+    </form>
+  </dialog>
+
+  <dialog class="settings-dialog strategy-dialog" id="strategyDialog" aria-labelledby="strategyDialogTitle">
+    <form method="dialog" class="dialog-shell">
+      <header>
+        <div><span class="section-kicker">单层 AND / OR</span><h2 id="strategyDialogTitle">策略</h2></div>
+        <button class="dialog-close" value="cancel">关闭</button>
+      </header>
+      <div class="strategy-topline">
+        <label><span>策略模板</span><select id="strategySelect"></select></label>
+        <label><span>策略名称</span><input id="strategyNameInput" maxlength="40"></label>
+      </div>
+      <p id="strategyEditHint" class="dialog-intro"></p>
+      <div class="strategy-rule-columns">
+        <section>
+          <div class="rule-heading"><h3>买入条件</h3><select id="entryMatchMode"><option value="All">满足全部（AND）</option><option value="Any">满足任一（OR）</option></select></div>
+          <div id="entryConditions" class="condition-list"></div>
+          <button class="condition-add" data-side="entry" type="button">添加买入条件</button>
+        </section>
+        <section>
+          <div class="rule-heading"><h3>卖出条件</h3><select id="exitMatchMode"><option value="All">满足全部（AND）</option><option value="Any">满足任一（OR）</option></select></div>
+          <div id="exitConditions" class="condition-list"></div>
+          <button class="condition-add" data-side="exit" type="button">添加卖出条件</button>
+        </section>
+      </div>
+      <footer>
+        <span>不执行脚本；保存后立即重新分析并在图表生成买卖点。</span>
+        <div><button class="secondary-button" value="cancel">取消</button><button class="primary-button" id="saveStrategyButton" value="default">保存为我的策略</button></div>
+      </footer>
+    </form>
+  </dialog>
+
+  <script src="/vendor/klinecharts/klinecharts.min.js" defer></script>
+  <script src="/quant-chart.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

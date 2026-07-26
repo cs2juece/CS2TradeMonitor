@@ -8,6 +8,7 @@ using CS2TradeMonitor.Infrastructure.Configuration;
 using CS2TradeMonitor.Infrastructure.Diagnostics;
 using CS2TradeMonitor.Infrastructure.YouPin;
 using CS2TradeMonitor.Infrastructure.Http;
+using CS2TradeMonitor.Infrastructure.Notifications;
 using CS2TradeMonitor.Infrastructure.Paths;
 using CS2TradeMonitor.Infrastructure.Security;
 using CS2TradeMonitor.Infrastructure.System;
@@ -17,6 +18,7 @@ using CS2TradeMonitor.src.Core.Modules;
 using CS2TradeMonitor.src.Core.State;
 using CS2TradeMonitor.src.SystemServices.InfoService;
 using CS2TradeMonitor.Application.Steam.Auth;
+using CS2TradeMonitor.Application.Monitoring;
 using CS2TradeMonitor.src.UI.Framework;
 using Microsoft.Extensions.DependencyInjection;
 using InfoServiceType = CS2TradeMonitor.src.SystemServices.InfoService.InfoService;
@@ -80,6 +82,10 @@ namespace CS2TradeMonitor.src.SystemServices
             services.AddSingleton<ICs2UpdateReminderService>(_ => Cs2UpdateReminderService.Instance);
             services.AddSingleton(_ => PhoneAlertDispatchService.Instance);
             services.AddSingleton<IPhoneAlertDispatchService>(_ => PhoneAlertDispatchService.Instance);
+            services.AddSingleton<FileAlertHistoryStore>();
+            services.AddSingleton<IAlertHistoryStore>(provider =>
+                provider.GetRequiredService<FileAlertHistoryStore>());
+            services.AddSingleton<MonitoringConsoleSnapshotBuilder>();
             services.AddSingleton(_ => ServerChanPushService.Instance);
             services.AddSingleton<IServerChanPushService>(_ => ServerChanPushService.Instance);
             services.AddSingleton(_ => SoftwareUpdateService.Instance);

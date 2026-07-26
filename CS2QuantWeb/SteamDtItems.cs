@@ -21,15 +21,22 @@ public sealed class SteamDtItemCatalogProvider
         _explicitCatalogPath = catalogPath;
     }
 
-    public async Task<IReadOnlyList<SteamDtCatalogItem>> SearchAsync(
+    public async Task<SteamDtCatalogSearchResult> SearchAsync(
         string? query,
         int limit,
+        int offset,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
-            return [];
+        {
+            return new SteamDtCatalogSearchResult(
+                [],
+                0,
+                Math.Max(0, offset),
+                Math.Clamp(limit, 1, 100));
+        }
         SteamDtItemCatalog catalog = await GetCatalogAsync(cancellationToken);
-        return catalog.Search(query, Math.Clamp(limit, 1, 30));
+        return catalog.SearchPage(query, limit, offset);
     }
 
     public async Task<SteamDtCatalogItem?> FindByMarketHashNameAsync(
@@ -186,7 +193,8 @@ public sealed class SteamDtItemSeriesAdapter
                     candle.High,
                     candle.Low,
                     candle.Close,
-                    candle.Volume)).ToArray(),
+                    candle.Volume,
+                    candle.Turnover)).ToArray(),
                 period == SteamDtKlinePeriod.Weekly ? CandleInterval.Week : CandleInterval.Day);
             RemoveExpiredCacheEntries();
             _cache[cacheKey] = new CacheEntry(series, DateTimeOffset.UtcNow.Add(CacheDuration));

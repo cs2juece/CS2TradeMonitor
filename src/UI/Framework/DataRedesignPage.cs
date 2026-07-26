@@ -770,6 +770,10 @@ namespace CS2TradeMonitor.src.UI.Framework
         private void SaveSteamDtCredentials(string rawKey)
         {
             string normalizedKey = rawKey?.Trim() ?? "";
+            bool credentialChanged = !string.Equals(
+                Get(SettingsKeys.SteamDtApiKey, "").Trim(),
+                normalizedKey,
+                StringComparison.Ordinal);
             int refreshSec = DataPageModel.NormalizeMarketRefreshValue(Get(SettingsKeys.SteamDtRefreshSec, Settings.DefaultMarketRefreshSec));
             Set(SettingsKeys.SteamDtApiKey, normalizedKey);
             Set(SettingsKeys.SteamDtRefreshSec, refreshSec);
@@ -777,11 +781,17 @@ namespace CS2TradeMonitor.src.UI.Framework
             MarketDataSourceManager.UpdateMarketRefreshIntervals(
                 refreshSec,
                 DataPageModel.NormalizeMarketRefreshValue(Get(SettingsKeys.CsqaqRefreshSec, Settings.DefaultMarketRefreshSec)));
+            if (credentialChanged)
+                QuantResearchServiceProcessHost.Instance.Stop();
         }
 
         private void SaveCsqaqCredentials(string token)
         {
             string normalizedToken = token?.Trim() ?? "";
+            bool credentialChanged = !string.Equals(
+                Get(SettingsKeys.CsqaqApiToken, "").Trim(),
+                normalizedToken,
+                StringComparison.Ordinal);
             int refreshSec = DataPageModel.NormalizeMarketRefreshValue(Get(SettingsKeys.CsqaqRefreshSec, Settings.DefaultMarketRefreshSec));
             Set(SettingsKeys.CsqaqApiToken, normalizedToken);
             Set(SettingsKeys.CsqaqRefreshSec, refreshSec);
@@ -789,6 +799,8 @@ namespace CS2TradeMonitor.src.UI.Framework
             MarketDataSourceManager.UpdateMarketRefreshIntervals(
                 DataPageModel.NormalizeMarketRefreshValue(Get(SettingsKeys.SteamDtRefreshSec, Settings.DefaultMarketRefreshSec)),
                 refreshSec);
+            if (credentialChanged)
+                QuantResearchServiceProcessHost.Instance.Stop();
         }
 
         private void SetIntervalInputText(LiteNumberInput? input, int seconds)

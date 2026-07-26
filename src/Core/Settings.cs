@@ -464,10 +464,13 @@ namespace CS2TradeMonitor
 
         // 缓存的最近一次状态。
         public double LastPrice { get; set; } = 0;
+        public double LastYouPinBidPrice { get; set; } = 0;
         public double LastChange { get; set; } = 0;
         public double LastChangeRatio { get; set; } = 0;
         public long LastUpdateTime { get; set; } = 0;
+        public long LastYouPinBidUpdateTime { get; set; } = 0;
         public string LastStatus { get; set; } = "";
+        public string LastYouPinBidStatus { get; set; } = "";
 
         // 兼容 SteamDT BaseInfo 的字段。
         public string MarketHashName { get; set; } = "";

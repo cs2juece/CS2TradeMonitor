@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CS2TradeMonitor.Application.Abstractions;
+using CS2TradeMonitor.Application.Monitoring;
 
 namespace CS2TradeMonitor.src.Core
 {
@@ -25,6 +26,7 @@ namespace CS2TradeMonitor.src.Core
         private readonly Dictionary<string, DateTime> _lastProcessedSamples = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<MarketAlertSample>> _history = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _lastAlertTimes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _alertTimeLock = new();
         private readonly List<MarketAlertMessage> _pendingFullscreenAlerts = new();
         private DateTime _lastSuppressedAt = DateTime.MinValue;
 
@@ -64,6 +66,89 @@ namespace CS2TradeMonitor.src.Core
             FlushPendingIfReady(cfg, suppress, now);
         }
 
+        public AlertReadinessSnapshot GetReadiness(Settings cfg)
+        {
+            ArgumentNullException.ThrowIfNull(cfg);
+
+            DateTimeOffset observedAt = DateTimeOffset.Now;
+            if (!cfg.MarketAlertsEnabled)
+            {
+                return new AlertReadinessSnapshot(
+                    "market-alert",
+                    "大盘预警",
+                    AlertReadinessState.Disabled,
+                    "总开关已关闭",
+                    "MarketAlerts",
+                    observedAt);
+            }
+
+            MarketAlertRule[] rules = cfg.MarketAlertRules
+                .Where(rule => rule.Enabled && rule.Threshold > 0)
+                .ToArray();
+            if (rules.Length == 0)
+            {
+                return new AlertReadinessSnapshot(
+                    "market-alert",
+                    "大盘预警",
+                    AlertReadinessState.Waiting,
+                    "没有已启用且阈值有效的规则",
+                    "MarketAlerts",
+                    observedAt);
+            }
+
+            int waitingForData = rules
+                .Select(rule => rule.SourceId)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count(sourceId =>
+                {
+                    string displayKey = string.Equals(sourceId, MarketDataSourceManager.SteamDtId, StringComparison.OrdinalIgnoreCase)
+                        ? MarketDataSourceManager.SteamDtDisplayKey
+                        : MarketDataSourceManager.QaqDisplayKey;
+                    MarketDisplaySnapshot snapshot = MarketDataSourceManager.GetDisplaySnapshot(displayKey);
+                    return !snapshot.HasData || snapshot.IsStale || snapshot.RetrievedAt == default;
+                });
+            if (waitingForData > 0)
+            {
+                return new AlertReadinessSnapshot(
+                    "market-alert",
+                    "大盘预警",
+                    AlertReadinessState.Waiting,
+                    $"{waitingForData} 个数据源等待有效数据",
+                    "MarketAlerts",
+                    observedAt);
+            }
+
+            DateTime now = observedAt.LocalDateTime;
+            Dictionary<string, DateTime> lastAlertTimes;
+            lock (_alertTimeLock)
+                lastAlertTimes = new Dictionary<string, DateTime>(_lastAlertTimes, StringComparer.OrdinalIgnoreCase);
+            int coolingDown = rules.Count(rule =>
+            {
+                if (!lastAlertTimes.TryGetValue(rule.Id, out DateTime lastAlert))
+                    return false;
+                int minutes = Math.Clamp(rule.CooldownMinutes, 1, 1440);
+                return now - lastAlert < TimeSpan.FromMinutes(minutes);
+            });
+            if (coolingDown == rules.Length)
+            {
+                return new AlertReadinessSnapshot(
+                    "market-alert",
+                    "大盘预警",
+                    AlertReadinessState.CoolingDown,
+                    $"{coolingDown} 条规则处于冷却期",
+                    "MarketAlerts",
+                    observedAt);
+            }
+
+            return new AlertReadinessSnapshot(
+                "market-alert",
+                "大盘预警",
+                AlertReadinessState.Ready,
+                $"{rules.Length - coolingDown} 条规则已准备 · 冷却 {coolingDown} 条",
+                "MarketAlerts",
+                observedAt);
+        }
+
         private void EvaluateSource(Settings cfg, string sourceId, string displayKey, bool suppress, DateTime now)
         {
             var rules = cfg.MarketAlertRules
@@ -101,7 +186,8 @@ namespace CS2TradeMonitor.src.Core
                 if (!TryBuildAlert(rule, sourceId, history, current, now, out var message))
                     continue;
 
-                _lastAlertTimes[rule.Id] = now;
+                lock (_alertTimeLock)
+                    _lastAlertTimes[rule.Id] = now;
                 Dispatch(cfg, message, suppress, now);
             }
         }
@@ -117,8 +203,10 @@ namespace CS2TradeMonitor.src.Core
             message = default;
 
             int cooldownMinutes = Math.Clamp(rule.CooldownMinutes, 1, 1440);
-            if (_lastAlertTimes.TryGetValue(rule.Id, out var lastAlert)
-                && now - lastAlert < TimeSpan.FromMinutes(cooldownMinutes))
+            DateTime lastAlert;
+            lock (_alertTimeLock)
+                _lastAlertTimes.TryGetValue(rule.Id, out lastAlert);
+            if (lastAlert != default && now - lastAlert < TimeSpan.FromMinutes(cooldownMinutes))
             {
                 return false;
             }

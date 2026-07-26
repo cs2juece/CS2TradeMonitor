@@ -38,6 +38,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         private static readonly SettingsPageRoute[] Routes =
         {
             // SettingsForm is the production shell. Pages below must be Framework hosts.
+            new("Console", () => "🧭 控制台", typeof(ConsoleHostPage), () => new ConsoleHostPage()),
             new("MainPanel", () => "🖥️ " + LanguageManager.T("Menu.MainFormSettings"), typeof(MainPanelHostPage), () => new MainPanelHostPage()),
             new("ItemMonitor", () => "📦 单品监控", typeof(ItemMonitorHostPage), () => new ItemMonitorHostPage()),
             new("YouPin", () => "🔔 悠悠有品", typeof(YouPinCcHostPage), () => new YouPinCcHostPage()),

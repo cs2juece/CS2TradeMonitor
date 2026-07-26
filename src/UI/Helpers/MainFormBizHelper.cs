@@ -207,7 +207,7 @@ namespace CS2TradeMonitor.src.UI.Helpers
             {
                 if (e.Button == MouseButtons.Left)
                 {
-                    ToggleMainWindowFromTray();
+                    OpenSettings();
                 }
             };
         }
@@ -217,21 +217,22 @@ namespace CS2TradeMonitor.src.UI.Helpers
             try
             {
                 var mainForm = (MainForm)_form;
-
-                if (_isHidden)
-                {
+                if (ShouldShowMainWindowFromEntryPoint(_isHidden, _form.Visible, _form.WindowState))
                     mainForm.ShowMainWindow();
-                    return;
-                }
-
-                if (_form.Visible) mainForm.HideMainWindow();
-                else mainForm.ShowMainWindow();
+                else
+                    mainForm.HideMainWindow();
             }
             catch (Exception ex)
             {
                 DiagnosticsLogger.Error("Tray", "Tray double-click toggle failed.", ex);
             }
         }
+
+        internal static bool ShouldShowMainWindowFromEntryPoint(
+            bool isAutoHidden,
+            bool isVisible,
+            FormWindowState windowState) =>
+            isAutoHidden || !isVisible || windowState == FormWindowState.Minimized;
 
         public void RebuildMenus()
         {
@@ -339,7 +340,7 @@ namespace CS2TradeMonitor.src.UI.Helpers
             var area = screen.WorkingArea;
             var savedPosition = _cfg.Position;
 
-            if (IsSavedLocationUsable(area, savedPosition))
+            if (IsSavedLocationUsable(area, savedPosition, _form.Size))
             {
                 SetSafeLocation(area, savedPosition.X, savedPosition.Y);
             }
@@ -360,12 +361,12 @@ namespace CS2TradeMonitor.src.UI.Helpers
             return Screen.AllScreens.FirstOrDefault(s => s.DeviceName == _cfg.ScreenDevice);
         }
 
-        private bool IsSavedLocationUsable(Rectangle area, Point position)
+        internal static bool IsSavedLocationUsable(Rectangle area, Point position, Size windowSize)
         {
-            if (position.X < 0 || position.Y < 0) return false;
+            if (position == new Point(-1, -1)) return false;
 
-            int width = Math.Max(1, _form.Width);
-            int height = Math.Max(1, _form.Height);
+            int width = Math.Max(1, windowSize.Width);
+            int height = Math.Max(1, windowSize.Height);
             var windowBounds = new Rectangle(position.X, position.Y, width, height);
             return area.Contains(windowBounds);
         }

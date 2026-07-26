@@ -103,6 +103,36 @@ namespace CS2TradeMonitor.Application.Market
             return (bestPrice, bestUpdateTime, bestPlatformName);
         }
 
+        internal static (double Price, long UpdateTime) SelectYouPinBidPrice(JsonElement payload)
+        {
+            double bestPrice = 0;
+            long bestUpdateTime = 0;
+
+            foreach (JsonElement element in EnumeratePlatformRows(payload))
+            {
+                if (element.ValueKind != JsonValueKind.Object || !IsYouPinPlatform(element))
+                    continue;
+
+                double price = GetDoubleProperty(
+                    element,
+                    "biddingPrice",
+                    "bidPrice",
+                    "buyPrice",
+                    "purchasePrice");
+                if (price <= 0 || price < bestPrice)
+                    continue;
+
+                long updateTime = GetLongProperty(element, "updateTime", "timestamp", "systemTime");
+                if (price > bestPrice || updateTime >= bestUpdateTime)
+                {
+                    bestPrice = price;
+                    bestUpdateTime = updateTime;
+                }
+            }
+
+            return (bestPrice, bestUpdateTime);
+        }
+
         internal static bool HasProperty(JsonElement element, string name)
         {
             return element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out _);
@@ -132,6 +162,53 @@ namespace CS2TradeMonitor.Application.Market
                 }
             }
             return 0;
+        }
+
+        private static IEnumerable<JsonElement> EnumeratePlatformRows(JsonElement payload)
+        {
+            if (payload.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement element in payload.EnumerateArray())
+                    yield return element;
+                yield break;
+            }
+
+            if (payload.ValueKind != JsonValueKind.Object)
+                yield break;
+
+            foreach (string listName in new[] { "sellingPriceList", "priceList", "platformList" })
+            {
+                if (!payload.TryGetProperty(listName, out JsonElement list)
+                    || list.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (JsonElement element in list.EnumerateArray())
+                    yield return element;
+            }
+        }
+
+        private static bool IsYouPinPlatform(JsonElement element)
+        {
+            foreach (string propertyName in new[] { "platform", "platformCode", "platformName", "name" })
+            {
+                if (!element.TryGetProperty(propertyName, out JsonElement property)
+                    || property.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                string value = property.GetString() ?? "";
+                if (value.Contains("悠悠", StringComparison.OrdinalIgnoreCase)
+                    || value.Contains("youpin", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("yp", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
     }

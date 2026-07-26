@@ -80,6 +80,7 @@ public sealed class CsvSeriesAdapter(IHostEnvironment environment)
         int lowIndex = FindHeader(headers, "low", "最低");
         int closeIndex = FindHeader(headers, "close", "收盘");
         int volumeIndex = FindOptionalHeader(headers, "volume", "vol", "成交量");
+        int turnoverIndex = FindOptionalHeader(headers, "turnover", "amount", "成交额");
         var candles = new List<QuantCandle>();
         for (int lineNumber = 1; lineNumber < lines.Length; lineNumber++)
         {
@@ -95,7 +96,8 @@ public sealed class CsvSeriesAdapter(IHostEnvironment environment)
                     ParseNumber(fields[highIndex]),
                     ParseNumber(fields[lowIndex]),
                     ParseNumber(fields[closeIndex]),
-                    volumeIndex < 0 || volumeIndex >= fields.Length ? 0 : ParseNumber(fields[volumeIndex])));
+                    volumeIndex < 0 || volumeIndex >= fields.Length ? 0 : ParseNumber(fields[volumeIndex]),
+                    turnoverIndex < 0 || turnoverIndex >= fields.Length ? null : ParseNumber(fields[turnoverIndex])));
             }
             catch (Exception ex) when (ex is FormatException or IndexOutOfRangeException)
             {
@@ -269,7 +271,10 @@ internal static class CsqaqPayloadParser
         }
 
         TryGetNumber(element, out double volume, "volume", "vol", "v");
-        candle = new QuantCandle(date, open, high, low, close, volume);
+        double? turnover = TryGetNumber(element, out double amount, "turnover", "amount", "tradeAmount")
+            ? amount
+            : null;
+        candle = new QuantCandle(date, open, high, low, close, volume, turnover);
         return true;
     }
 

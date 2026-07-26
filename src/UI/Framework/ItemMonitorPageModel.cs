@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using CS2TradeMonitor.Application.Market;
 using System.Linq;
 
 namespace CS2TradeMonitor.src.UI.Framework
@@ -17,8 +18,9 @@ namespace CS2TradeMonitor.src.UI.Framework
         public const int FieldPercent = 1 << 3;
         public const int FieldSource = 1 << 4;
         public const int FieldRefreshTime = 1 << 5;
+        public const int FieldYouPinBid = 1 << 6;
         public const int DefaultFields = FieldName | FieldPrice;
-        public const int AllFields = FieldName | FieldPrice | FieldChange | FieldPercent | FieldSource | FieldRefreshTime;
+        public const int AllFields = FieldName | FieldPrice | FieldChange | FieldPercent | FieldSource | FieldRefreshTime | FieldYouPinBid;
 
         public static string BuildItemListSignature(
             IEnumerable<ItemMonitorConfig> items,
@@ -60,13 +62,16 @@ namespace CS2TradeMonitor.src.UI.Framework
                     item.SortIndex,
                     item.TaskbarSortIndex,
                     item.LastPrice.ToString("0.####", CultureInfo.InvariantCulture),
+                    item.LastYouPinBidPrice.ToString("0.####", CultureInfo.InvariantCulture),
                     item.LastChange.ToString("0.####", CultureInfo.InvariantCulture),
                     item.LastChangeRatio.ToString("0.####", CultureInfo.InvariantCulture),
                     item.HasChangeData,
                     item.LastStatus,
+                    item.LastYouPinBidStatus,
                     item.MarketHashName,
                     item.PlatformItemId,
-                    item.LastUpdateTime));
+                    item.LastUpdateTime,
+                    item.LastYouPinBidUpdateTime));
 
             return settings + "\n" + string.Join("\n", itemParts);
         }
@@ -205,24 +210,24 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public static string BuildItemStatusText(ItemMonitorConfig item)
         {
-            if (item.LastPrice <= 0)
+            var parts = new List<string>();
+            if (item.LastPrice > 0)
             {
-                return string.IsNullOrWhiteSpace(item.LastStatus)
-                    ? "价格：未读取"
-                    : "价格：未读取  状态：" + item.LastStatus;
+                parts.Add("当前 ¥" + item.LastPrice.ToString("F2"));
+                if (item.HasChangeData)
+                {
+                    parts.Add(MarketDisplayFormatter.FormatSignedChange(item.LastChange));
+                    parts.Add(MarketDisplayFormatter.FormatSignedPercent(item.LastChangeRatio));
+                }
+            }
+            else
+            {
+                parts.Add("价格：未读取");
             }
 
-            var parts = new List<string>
-            {
-                "当前 ¥" + item.LastPrice.ToString("F2")
-            };
-            if (item.HasChangeData)
-            {
-                parts.Add(MarketDisplayFormatter.FormatSignedChange(item.LastChange));
-                parts.Add(MarketDisplayFormatter.FormatSignedPercent(item.LastChangeRatio));
-            }
+            parts.Add(BuildYouPinBidText(item));
             if (!string.IsNullOrWhiteSpace(item.LastStatus) && !item.LastStatus.Equals("成功", StringComparison.OrdinalIgnoreCase))
-                parts.Add(item.LastStatus);
+                parts.Add(item.LastPrice > 0 ? item.LastStatus : "状态：" + item.LastStatus);
             if (item.LastUpdateTime > 0)
             {
                 try
@@ -240,15 +245,15 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public static string BuildCompactPriceText(ItemMonitorConfig item)
         {
-            if (item.LastPrice <= 0)
-                return "暂无价格 · 稍后自动重试";
+            var parts = new List<string>();
+            if (item.LastPrice > 0)
+                parts.Add((IsCacheStatus(item.LastStatus) ? "缓存 ¥" : "当前 ¥") + item.LastPrice.ToString("F2", CultureInfo.InvariantCulture));
+            else
+                parts.Add("暂无价格");
 
-            var parts = new List<string>
-            {
-                (IsCacheStatus(item.LastStatus) ? "缓存 ¥" : "当前 ¥") + item.LastPrice.ToString("F2", CultureInfo.InvariantCulture)
-            };
+            parts.Add(BuildYouPinBidText(item));
 
-            if (item.HasChangeData)
+            if (item.LastPrice > 0 && item.HasChangeData)
             {
                 parts.Add(MarketDisplayFormatter.FormatSignedChange(item.LastChange));
                 parts.Add(MarketDisplayFormatter.FormatSignedPercent(item.LastChangeRatio));
@@ -258,8 +263,19 @@ namespace CS2TradeMonitor.src.UI.Framework
                 parts.Add("后台读取中");
             else if (!item.HasChangeData && IsCacheStatus(item.LastStatus))
                 parts.Add("后台补数据");
+            else if (item.LastPrice <= 0)
+                parts.Add("稍后自动重试");
 
             return string.Join("  ", parts);
+        }
+
+        public static string BuildYouPinBidText(ItemMonitorConfig item)
+        {
+            if (item.LastYouPinBidPrice <= 0)
+                return "悠悠求购 --";
+
+            string text = "悠悠求购 ¥" + item.LastYouPinBidPrice.ToString("F2", CultureInfo.InvariantCulture);
+            return IsCacheStatus(item.LastYouPinBidStatus) ? text + "（缓存）" : text;
         }
 
         public static string BuildLastRefreshShortText(ItemMonitorConfig item, DateTime? now = null)
@@ -304,15 +320,7 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public static ItemPriceAlertTriggerMode ResolveTriggerMode(ItemMonitorConfig item)
         {
-            if (item.PriceAlertTriggerMode == ItemPriceAlertTriggerMode.Breakthrough ||
-                item.PriceAlertTriggerMode == ItemPriceAlertTriggerMode.Percent)
-            {
-                return item.PriceAlertTriggerMode;
-            }
-
-            return item.PriceAlertAbove > 0 || item.PriceAlertBelow > 0
-                ? ItemPriceAlertTriggerMode.Breakthrough
-                : ItemPriceAlertTriggerMode.Percent;
+            return ItemPriceAlertPolicy.ResolveTriggerMode(item);
         }
 
         public static int NormalizeItemRefreshInterval(int value, int fallback)

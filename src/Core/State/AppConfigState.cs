@@ -89,10 +89,13 @@ namespace CS2TradeMonitor.src.Core.State
                             x.VisibleInTaskbar,
                             x.RefreshIntervalSec,
                             x.LastPrice,
+                            x.LastYouPinBidPrice,
                             x.LastChange,
                             x.LastChangeRatio,
                             x.LastUpdateTime,
+                            x.LastYouPinBidUpdateTime,
                             x.LastStatus ?? "",
+                            x.LastYouPinBidStatus ?? "",
                             x.HasChangeData))
                         .ToArray() ?? Array.Empty<ItemConfigSummary>());
 

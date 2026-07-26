@@ -20,7 +20,7 @@ internal static class ChanStructureAnalyzer
         IReadOnlyList<ChanStroke> strokes = BuildStrokes(fractals);
         IReadOnlyList<ChanSegment> segments = BuildSegments(strokes);
         IReadOnlyList<ChanCenter> centers = BuildCenters(strokes);
-        IReadOnlyList<ResearchSignal> signals = BuildSignals(strokes, centers, indicators);
+        IReadOnlyList<ResearchSignal> signals = ChanBuySellPointAnalyzer.Analyze(strokes, centers, indicators);
         IReadOnlyList<string> conclusions = BuildConclusions(fractals, strokes, centers, signals);
         return new ChanAnalysis(fractals, strokes, segments, centers, signals, conclusions);
     }
@@ -81,9 +81,21 @@ internal static class ChanStructureAnalyzer
             bool isBottom = middle.Low < left.Low && middle.Low <= right.Low
                 && middle.High < left.High && middle.High <= right.High;
             if (isTop)
-                candidates.Add(new ChanFractal(middle.EndIndex, middle.Date, FractalKind.Top, middle.High));
+            {
+                candidates.Add(new ChanFractal(middle.EndIndex, middle.Date, FractalKind.Top, middle.High)
+                {
+                    ConfirmedIndex = right.EndIndex,
+                    ConfirmedDate = right.Date
+                });
+            }
             else if (isBottom)
-                candidates.Add(new ChanFractal(middle.EndIndex, middle.Date, FractalKind.Bottom, middle.Low));
+            {
+                candidates.Add(new ChanFractal(middle.EndIndex, middle.Date, FractalKind.Bottom, middle.Low)
+                {
+                    ConfirmedIndex = right.EndIndex,
+                    ConfirmedDate = right.Date
+                });
+            }
         }
 
         var alternating = new List<ChanFractal>();
@@ -138,7 +150,11 @@ internal static class ChanStructureAnalyzer
                 fractal.Date,
                 start.Price,
                 fractal.Price,
-                fractal.Price > start.Price));
+                fractal.Price > start.Price)
+            {
+                ConfirmedIndex = fractal.ConfirmedIndex,
+                ConfirmedDate = fractal.ConfirmedDate
+            });
             start = fractal;
         }
 
@@ -181,110 +197,28 @@ internal static class ChanStructureAnalyzer
             if (lower > upper)
                 continue;
 
-            var center = new ChanCenter(
-                window[0].StartIndex,
-                window[^1].EndIndex,
-                window[0].StartDate,
-                window[^1].EndDate,
-                lower,
-                upper);
-            if (centers.Count > 0 && center.StartIndex <= centers[^1].EndIndex)
+            int endStrokeIndex = i + 2;
+            while (endStrokeIndex + 1 < strokes.Count)
             {
-                ChanCenter previous = centers[^1];
-                double mergedLower = Math.Max(previous.Lower, center.Lower);
-                double mergedUpper = Math.Min(previous.Upper, center.Upper);
-                if (mergedLower <= mergedUpper)
-                {
-                    centers[^1] = previous with
-                    {
-                        EndIndex = center.EndIndex,
-                        EndDate = center.EndDate,
-                        Lower = mergedLower,
-                        Upper = mergedUpper
-                    };
-                    continue;
-                }
+                ChanStroke next = strokes[endStrokeIndex + 1];
+                if (next.EndPrice < lower || next.EndPrice > upper)
+                    break;
+
+                endStrokeIndex++;
             }
 
-            centers.Add(center);
+            ChanStroke last = strokes[endStrokeIndex];
+            centers.Add(new ChanCenter(
+                window[0].StartIndex,
+                last.EndIndex,
+                window[0].StartDate,
+                last.EndDate,
+                lower,
+                upper));
+            i = Math.Max(i, endStrokeIndex - 2);
         }
 
         return centers;
-    }
-
-    private static IReadOnlyList<ResearchSignal> BuildSignals(
-        IReadOnlyList<ChanStroke> strokes,
-        IReadOnlyList<ChanCenter> centers,
-        IReadOnlyList<IndicatorPoint> indicators)
-    {
-        var signals = new List<ResearchSignal>();
-        for (int i = 2; i < strokes.Count; i++)
-        {
-            ChanStroke previous = strokes[i - 2];
-            ChanStroke current = strokes[i];
-            if (previous.IsUp != current.IsUp)
-                continue;
-
-            bool priceExtends = current.IsUp
-                ? current.EndPrice > previous.EndPrice
-                : current.EndPrice < previous.EndPrice;
-            double previousArea = MacdArea(previous, indicators);
-            double currentArea = MacdArea(current, indicators);
-            if (!priceExtends || previousArea <= 0 || currentArea >= previousArea * 0.9)
-                continue;
-
-            signals.Add(new ResearchSignal(
-                current.EndDate,
-                "精简缠论",
-                current.IsUp ? SignalSide.Sell : SignalSide.Buy,
-                current.EndPrice,
-                current.IsUp ? "疑似一卖：价格创新高但 MACD 动能减弱" : "疑似一买：价格创新低但 MACD 动能减弱",
-                "candidate"));
-        }
-
-        foreach (ChanCenter center in centers)
-        {
-            ChanStroke? exit = strokes.FirstOrDefault(stroke => stroke.StartIndex >= center.EndIndex);
-            if (exit is null)
-                continue;
-
-            if (exit.IsUp && exit.EndPrice > center.Upper)
-            {
-                signals.Add(new ResearchSignal(
-                    exit.EndDate,
-                    "精简缠论",
-                    SignalSide.Buy,
-                    exit.EndPrice,
-                    "疑似三买：离开中枢上沿",
-                    "candidate"));
-            }
-            else if (!exit.IsUp && exit.EndPrice < center.Lower)
-            {
-                signals.Add(new ResearchSignal(
-                    exit.EndDate,
-                    "精简缠论",
-                    SignalSide.Sell,
-                    exit.EndPrice,
-                    "疑似三卖：离开中枢下沿",
-                    "candidate"));
-            }
-        }
-
-        return signals
-            .DistinctBy(signal => (signal.Date, signal.Side, signal.Reason))
-            .OrderBy(signal => signal.Date)
-            .ToArray();
-    }
-
-    private static double MacdArea(ChanStroke stroke, IReadOnlyList<IndicatorPoint> indicators)
-    {
-        int start = Math.Clamp(stroke.StartIndex, 0, indicators.Count - 1);
-        int end = Math.Clamp(stroke.EndIndex, 0, indicators.Count - 1);
-        double area = 0;
-        for (int i = start; i <= end; i++)
-            area += Math.Abs(indicators[i].Histogram);
-
-        return area;
     }
 
     private static IReadOnlyList<string> BuildConclusions(
@@ -304,7 +238,7 @@ internal static class ChanStructureAnalyzer
             conclusions.Add($"最近候选信号：{signals[^1].Reason}（{signals[^1].Date:yyyy-MM-dd}）。");
         else
             conclusions.Add("当前没有满足阈值的缠论候选买卖点。");
-        conclusions.Add("本模块采用可解释的精简结构规则，不等同于完整 chan.py。候选信号需人工复核。 ");
+        conclusions.Add("一、二、三类买卖点采用可解释的结构规则，属于研究候选信号，需人工复核。");
         return conclusions;
     }
 }

@@ -11,6 +11,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using CS2TradeMonitor.src.Core;
+using CS2TradeMonitor.Application.Monitoring;
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core.Refresh;
 using CS2TradeMonitor.Domain.Market;
@@ -31,9 +32,11 @@ namespace CS2TradeMonitor.Application.Market
                 bool success = false;
                 string errorMsg = "";
                 double price = 0;
+                double youPinBidPrice = 0;
                 double change = 0;
                 double changeRatio = 0;
                 long updateTime = 0;
+                long youPinBidUpdateTime = 0;
                 string source = "官方 API";
                 bool hasChangeData = false;
 
@@ -62,6 +65,10 @@ namespace CS2TradeMonitor.Application.Market
 
                                 if (apiSuccess && root.TryGetProperty("data", out var dataProp) && dataProp.ValueKind == JsonValueKind.Array)
                                 {
+                                    var youPinBid = SelectYouPinBidPrice(dataProp);
+                                    youPinBidPrice = youPinBid.Price;
+                                    youPinBidUpdateTime = youPinBid.UpdateTime;
+
                                     JsonElement selectedElem = default;
                                     bool found = false;
 
@@ -175,6 +182,10 @@ namespace CS2TradeMonitor.Application.Market
 
                                 if (apiSuccess && root.TryGetProperty("data", out var dataProp))
                                 {
+                                    var youPinBid = SelectYouPinBidPrice(dataProp);
+                                    youPinBidPrice = youPinBid.Price;
+                                    youPinBidUpdateTime = youPinBid.UpdateTime;
+
                                     price = GetDoubleProperty(dataProp, "price", "index", "lastPrice", "value");
                                     change = GetDoubleProperty(dataProp, "change", "diffYesterday", "riseFallDiff");
                                     changeRatio = GetDoubleProperty(dataProp, "changeRatio", "diffYesterdayRatio", "riseFallRate", "rate");
@@ -262,6 +273,15 @@ namespace CS2TradeMonitor.Application.Market
                             updateTime = publicData.UpdateTime;
                         }
 
+                        if (publicData.YouPinBidPrice > 0
+                            && (youPinBidPrice <= 0
+                                || publicData.YouPinBidUpdateTime <= 0
+                                || publicData.YouPinBidUpdateTime >= youPinBidUpdateTime))
+                        {
+                            youPinBidPrice = publicData.YouPinBidPrice;
+                            youPinBidUpdateTime = publicData.YouPinBidUpdateTime;
+                        }
+
                         success = true;
                     }
                     else if (!success)
@@ -274,16 +294,31 @@ namespace CS2TradeMonitor.Application.Market
 
                 if (success)
                 {
+                    bool hasFreshYouPinBid = youPinBidPrice > 0;
+                    if (!hasFreshYouPinBid && item.LastYouPinBidPrice > 0)
+                    {
+                        youPinBidPrice = item.LastYouPinBidPrice;
+                        youPinBidUpdateTime = item.LastYouPinBidUpdateTime;
+                    }
+
+                    string youPinBidStatus = hasFreshYouPinBid
+                        ? "成功"
+                        : youPinBidPrice > 0
+                            ? "缓存"
+                            : "暂无求购价";
                     var data = new SteamDtItemData
                     {
                         ItemId = item.ItemId,
                         Price = price,
+                        YouPinBidPrice = youPinBidPrice,
                         Change = change,
                         ChangeRatio = changeRatio,
                         UpdateTime = updateTime,
+                        YouPinBidUpdateTime = youPinBidUpdateTime,
                         RetrievedAt = DateTime.Now,
                         IsStale = false,
                         Source = source,
+                        YouPinBidStatus = youPinBidStatus,
                         HasChangeData = hasChangeData
                     };
                     _cache[item.ItemId] = data;
@@ -297,10 +332,13 @@ namespace CS2TradeMonitor.Application.Market
                     }
 
                     item.LastPrice = price;
+                    item.LastYouPinBidPrice = youPinBidPrice;
                     item.LastChange = change;
                     item.LastChangeRatio = changeRatio;
                     item.LastUpdateTime = updateTime;
+                    item.LastYouPinBidUpdateTime = youPinBidUpdateTime;
                     item.LastStatus = "成功";
+                    item.LastYouPinBidStatus = youPinBidStatus;
                     item.HasChangeData = hasChangeData;
                     ClearConfigErrorPause(item);
                     ClearFetchFailureLog(item);
@@ -324,7 +362,9 @@ namespace CS2TradeMonitor.Application.Market
                     {
                         existing.IsStale = true;
                         existing.Source = "缓存";
+                        existing.YouPinBidStatus = existing.YouPinBidPrice > 0 ? "缓存" : "未获取";
                     }
+                    item.LastYouPinBidStatus = item.LastYouPinBidPrice > 0 ? "缓存" : "未获取";
 
                     if (!configParameterError)
                     {
@@ -356,7 +396,7 @@ namespace CS2TradeMonitor.Application.Market
             int cooldownMinutes = Math.Clamp(item.PriceAlertCooldownMinutes > 0 ? item.PriceAlertCooldownMinutes : defaultCooldownMinutes, 1, 1440);
             double risePercentThreshold = item.PriceAlertRisePercent > 0 ? item.PriceAlertRisePercent : defaultRisePercent;
             double fallPercentThreshold = item.PriceAlertFallPercent > 0 ? item.PriceAlertFallPercent : defaultFallPercent;
-            ItemPriceAlertTriggerMode triggerMode = ResolveItemTriggerMode(item);
+            ItemPriceAlertTriggerMode triggerMode = ItemPriceAlertPolicy.ResolveTriggerMode(item);
 
             var baselineTime = UnixMsToLocalTime(item.PriceAlertBaselineTime);
             bool baselineMissing = item.PriceAlertBaselinePrice <= 0 || baselineTime == DateTime.MinValue;
@@ -405,20 +445,6 @@ namespace CS2TradeMonitor.Application.Market
         }
 
 
-        private static ItemPriceAlertTriggerMode ResolveItemTriggerMode(ItemMonitorConfig item)
-        {
-            if (item.PriceAlertTriggerMode == ItemPriceAlertTriggerMode.Breakthrough ||
-                item.PriceAlertTriggerMode == ItemPriceAlertTriggerMode.Percent)
-            {
-                return item.PriceAlertTriggerMode;
-            }
-
-            return item.PriceAlertAbove > 0 || item.PriceAlertBelow > 0
-                ? ItemPriceAlertTriggerMode.Breakthrough
-                : ItemPriceAlertTriggerMode.Percent;
-        }
-
-
         private static DateTime UnixMsToLocalTime(long unixMs)
         {
             if (unixMs <= 0)
@@ -449,7 +475,7 @@ namespace CS2TradeMonitor.Application.Market
                 AppNotificationPlacement.BottomLeft,
                 playSound: item.PriceAlertDesktopEnabled,
                 showToast: item.PriceAlertDesktopEnabled,
-                source: "单品监控",
+                source: AlertHistorySources.Item,
                 sendToPhone: item.PriceAlertPhoneEnabled);
         }
 
@@ -611,6 +637,7 @@ namespace CS2TradeMonitor.Application.Market
                 }
 
                 var selectedPrice = SelectPublicPlatformPrice(dataProp);
+                var youPinBid = SelectYouPinBidPrice(dataProp);
                 double price = selectedPrice.Price;
                 if (price <= 0)
                 {
@@ -647,12 +674,15 @@ namespace CS2TradeMonitor.Application.Market
                 {
                     ItemId = item.ItemId,
                     Price = price,
+                    YouPinBidPrice = youPinBid.Price,
                     Change = change,
                     ChangeRatio = changeRatio,
                     UpdateTime = updateTime,
+                    YouPinBidUpdateTime = youPinBid.UpdateTime,
                     RetrievedAt = DateTime.Now,
                     IsStale = false,
                     Source = source,
+                    YouPinBidStatus = youPinBid.Price > 0 ? "成功" : "暂无求购价",
                     HasChangeData = hasChangeData
                 };
             }

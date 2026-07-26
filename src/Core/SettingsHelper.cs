@@ -57,13 +57,18 @@ namespace CS2TradeMonitor
 
         public static Settings Load(bool forceReload = false)
         {
+            return LoadCore(FilePath, _backupPath);
+        }
+
+        internal static Settings LoadCore(string filePath, string backupPath)
+        {
             // 单例实例由 Settings.Load() facade 或调用方管理，本方法只负责磁盘读取和默认值创建。
 
             Settings s;
             lock (_ioLock)
             {
-                s = TryLoadFile(FilePath, backupCorrupt: true)
-                    ?? TryLoadFile(_backupPath, backupCorrupt: true)
+                s = TryLoadFile(filePath, backupCorrupt: true)
+                    ?? TryLoadFile(backupPath, backupCorrupt: true)
                     ?? new Settings();
             }
 
@@ -107,11 +112,6 @@ namespace CS2TradeMonitor
             {
                 // 9.0pt => 小字模式(0), 其他 => 大字模式(1)
                 s.TaskbarPresetStyle = (Math.Abs(s.TaskbarFontSize - Settings.DEFAULT_TB_SIZE_REGULAR) < 0.1f) ? 0 : 1;
-            }
-
-            if (s.TaskbarAlignLeft && IsOnlyMarketTaskbar(s))
-            {
-                s.TaskbarAlignLeft = false;
             }
 
             s.InternAllStrings();
@@ -250,6 +250,10 @@ namespace CS2TradeMonitor
                 item.PriceAlertFallPercent = Math.Clamp(item.PriceAlertFallPercent, 0, 1000);
                 item.PriceAlertWindowMinutes = Math.Clamp(item.PriceAlertWindowMinutes <= 0 ? s.DefaultItemPriceAlertWindowMinutes : item.PriceAlertWindowMinutes, 1, 10080);
                 item.PriceAlertCooldownMinutes = Math.Clamp(item.PriceAlertCooldownMinutes <= 0 ? s.DefaultItemPriceAlertCooldownMinutes : item.PriceAlertCooldownMinutes, 1, 1440);
+                if (!double.IsFinite(item.LastYouPinBidPrice) || item.LastYouPinBidPrice < 0)
+                    item.LastYouPinBidPrice = 0;
+                item.LastYouPinBidUpdateTime = Math.Max(0, item.LastYouPinBidUpdateTime);
+                item.LastYouPinBidStatus ??= "";
                 if (!Enum.IsDefined(typeof(ItemPriceAlertTriggerMode), item.PriceAlertTriggerMode))
                     item.PriceAlertTriggerMode = ItemPriceAlertTriggerMode.Auto;
             }
@@ -632,21 +636,6 @@ namespace CS2TradeMonitor
             };
         }
 
-        private static bool IsOnlyMarketTaskbar(Settings settings)
-        {
-            var taskbarItems = settings.MonitorItems?
-                .Where(x => x.VisibleInTaskbar)
-                .ToList();
-
-            return taskbarItems != null
-                && taskbarItems.Count > 0
-                && taskbarItems.All(x => IsMarketDisplayKey(x.Key));
-        }
-
-        private static bool IsMarketDisplayKey(string key)
-        {
-            return MarketDisplayFormatter.IsMarketDisplayKey(key);
-        }
         // [同步] 同步到语言设置
         // 作用：将配置中的组别名和监控项标签同步到语言管理器
         // 注意：这会清除所有当前的语言覆盖

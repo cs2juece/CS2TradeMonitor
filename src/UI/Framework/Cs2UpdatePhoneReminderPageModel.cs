@@ -189,13 +189,13 @@ namespace CS2TradeMonitor.src.UI.Framework
             if (twoColumn)
             {
                 int backupW = Math.Min(UIUtils.S(390), Math.Max(UIUtils.S(320), width / 3));
-                history = new Rectangle(0, y, width - backupW - gap, UIUtils.S(236));
+                history = new Rectangle(0, y, width - backupW - gap, UIUtils.S(532));
                 backup = new Rectangle(history.Right + gap, y, backupW, UIUtils.S(236));
                 y = Math.Max(history.Bottom, backup.Bottom);
             }
             else
             {
-                history = new Rectangle(0, y, width, UIUtils.S(236));
+                history = new Rectangle(0, y, width, UIUtils.S(532));
                 y = history.Bottom + gap;
                 backup = new Rectangle(0, y, width, UIUtils.S(214));
                 y = backup.Bottom;

@@ -78,7 +78,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                     _httpClient,
                     cancellationToken),
                 Task.Delay,
-                startupPollAttempts: 20,
+                startupPollAttempts: 60,
                 startupPollInterval: TimeSpan.FromMilliseconds(250),
                 serviceUrl: _serviceUrl);
 

@@ -43,13 +43,29 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
+KLineChart
+----------
+
+CS2QuantWeb bundles the KLineChart 10.0.0 browser distribution so the quant
+research page works offline without executing third-party CDN code at runtime.
+
+Source: https://www.npmjs.com/package/klinecharts/v/10.0.0
+License: Apache-2.0
+
+The distribution includes components from TradingView Lightweight Charts,
+also under Apache-2.0. Copyright notices, provenance, package integrity, and
+the full license texts are stored in:
+
+    CS2QuantWeb/wwwroot/vendor/klinecharts/
+
+
 Quant Research Module Reference Baselines
 -----------------------------------------
 
-The bundled CS2QuantWeb service does not embed third-party runtime code or
-assets. It uses the Microsoft .NET shared framework. Its feature scope and
-threshold baselines were studied from two historical local projects supplied
-by the project user:
+Apart from the KLineChart browser distribution documented above, the bundled
+CS2QuantWeb service uses the Microsoft .NET shared framework. Its feature scope
+and threshold baselines were studied from two historical local projects
+supplied by the project user:
 
 - stock-quant-cs2, Apache License 2.0. The C# strategy rules are a clean,
   state-free reimplementation. No Python source, bytecode, environment, data,

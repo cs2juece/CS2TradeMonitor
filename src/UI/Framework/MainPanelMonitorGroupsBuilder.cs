@@ -122,7 +122,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             }
             else
             {
-                _addHint(group, "这里控制单品是否进入悬浮窗/任务栏，以及显示名称、价格、涨跌、来源和刷新时间；抓取间隔为全局设置，所有单品共用。");
+                _addHint(group, "这里控制单品是否进入悬浮窗/任务栏，以及显示名称、价格、悠悠求购、涨跌、来源和刷新时间；抓取间隔为全局设置，所有单品共用。");
                 foreach (ItemMonitorConfig item in items.OrderBy(item => item.SortIndex).ThenBy(item => item.Name))
                     group.AddFullItem(CreateItemMonitorDisplayRow(item, items));
             }

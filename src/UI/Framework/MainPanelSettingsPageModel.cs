@@ -40,9 +40,13 @@ namespace CS2TradeMonitor.src.UI.Framework
                 return "请到左侧“单品监控”页面先添加饰品";
 
             if (item.LastPrice <= 0)
-                return string.IsNullOrWhiteSpace(item.LastStatus) ? "暂无价格数据" : item.LastStatus;
+            {
+                string status = string.IsNullOrWhiteSpace(item.LastStatus) ? "暂无价格数据" : item.LastStatus;
+                return status + "  " + ItemMonitorPageModel.BuildYouPinBidText(item);
+            }
 
             string text = $"当前 ¥{item.LastPrice:0.##}";
+            text += "  " + ItemMonitorPageModel.BuildYouPinBidText(item);
             if (Math.Abs(item.LastChange) > 0.000001)
                 text += $"  {item.LastChange:+0.##;-0.##;0}";
             if (item.HasChangeData)

@@ -96,7 +96,9 @@ namespace CS2TradeMonitor.src.UI.Framework
     public enum QuantResearchServiceState
     {
         Online,
+        ConfigurationRequired,
         Offline,
+        PortOccupied,
         InvalidAddress
     }
 
@@ -108,6 +110,7 @@ namespace CS2TradeMonitor.src.UI.Framework
     public static class QuantResearchEntryPageModel
     {
         public const string DefaultUrl = "http://127.0.0.1:5078/";
+        internal const int CurrentCredentialContractVersion = 1;
         private const int MaxHealthPayloadBytes = 16 * 1024;
         private static readonly TimeSpan HealthPayloadTimeout = TimeSpan.FromSeconds(2);
 
@@ -175,10 +178,9 @@ namespace CS2TradeMonitor.src.UI.Framework
                     cancellationToken).ConfigureAwait(false);
                 if (response.StatusCode != HttpStatusCode.OK)
                 {
-                    return new QuantResearchServiceStatus(
-                        QuantResearchServiceState.Offline,
-                        "服务未就绪",
-                        $"健康检查返回 HTTP {(int)response.StatusCode}。");
+                    return CreateUnexpectedServiceStatus(
+                        normalized!,
+                        $"该地址上的程序返回 HTTP {(int)response.StatusCode}，不是可用的 CS2QuantWeb 服务。");
                 }
 
                 try
@@ -202,6 +204,30 @@ namespace CS2TradeMonitor.src.UI.Framework
                         && string.Equals(status.GetString(), "ok", StringComparison.OrdinalIgnoreCase);
                     if (isExpectedService && isHealthy)
                     {
+                        bool usesCurrentCredentialContract =
+                            root.TryGetProperty("credentialContractVersion", out JsonElement contractVersion)
+                            && contractVersion.ValueKind == JsonValueKind.Number
+                            && contractVersion.TryGetInt32(out int version)
+                            && version == CurrentCredentialContractVersion;
+                        if (!usesCurrentCredentialContract)
+                        {
+                            return new QuantResearchServiceStatus(
+                                QuantResearchServiceState.ConfigurationRequired,
+                                "服务需要重启",
+                                "当前量化服务版本未使用最新凭据契约，请关闭该服务后从桌面端重新启动。 ");
+                        }
+
+                        bool steamDtConfigured =
+                            root.TryGetProperty("steamDtConfigured", out JsonElement configured)
+                            && configured.ValueKind is JsonValueKind.True;
+                        if (!steamDtConfigured)
+                        {
+                            return new QuantResearchServiceStatus(
+                                QuantResearchServiceState.ConfigurationRequired,
+                                "SteamDT 未就绪",
+                                "量化服务进程未加载桌面端保存的 SteamDT API Key，需要由桌面端重新启动服务。 ");
+                        }
+
                         return new QuantResearchServiceStatus(
                             QuantResearchServiceState.Online,
                             "本地服务已就绪",
@@ -212,18 +238,24 @@ namespace CS2TradeMonitor.src.UI.Framework
                 {
                     // A different process may own the configured port and return non-CS2QuantWeb content.
                 }
+                catch (HttpRequestException)
+                {
+                    // A listener returned an invalid or oversized health response.
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // A listener accepted the request but did not return a valid health payload in time.
+                }
 
-                return new QuantResearchServiceStatus(
-                    QuantResearchServiceState.Offline,
-                    "端口被占用",
+                return CreateUnexpectedServiceStatus(
+                    normalized!,
                     "该地址没有运行 CS2QuantWeb，请关闭占用端口的其他程序后重试。");
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                return new QuantResearchServiceStatus(
-                    QuantResearchServiceState.Offline,
-                    "服务未响应",
-                    "连接超时，请先启动独立网页服务。 ");
+                return CreateUnexpectedServiceStatus(
+                    normalized!,
+                    "该地址有程序监听，但未按时返回 CS2QuantWeb 健康状态。请关闭占用端口的其他程序后重试。 ");
             }
             catch (HttpRequestException)
             {
@@ -232,6 +264,19 @@ namespace CS2TradeMonitor.src.UI.Framework
                     "服务未启动",
                     "请先运行 CS2QuantWeb，再打开网页。 ");
             }
+        }
+
+        private static QuantResearchServiceStatus CreateUnexpectedServiceStatus(Uri serviceUrl, string detail)
+        {
+            return CanStartLocalService(serviceUrl)
+                ? new QuantResearchServiceStatus(
+                    QuantResearchServiceState.PortOccupied,
+                    "端口被占用",
+                    detail)
+                : new QuantResearchServiceStatus(
+                    QuantResearchServiceState.Offline,
+                    "服务未就绪",
+                    detail);
         }
     }
 }

@@ -96,6 +96,25 @@ namespace CS2TradeMonitor
             ApplyUiSnapshot(UiSnapshot.Empty);
         }
 
+        protected override AccessibleObject CreateAccessibilityInstance()
+        {
+            return new TaskbarEntryPointAccessibleObject(this, InvokeAccessibleDefaultAction);
+        }
+
+        private void InvokeAccessibleDefaultAction()
+        {
+            if (IsDisposed || Disposing)
+                return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(InvokeAccessibleDefaultAction));
+                return;
+            }
+
+            _bizHelper.HandleDoubleClick(_mainForm, _ui);
+        }
+
         public void ReloadLayout()
         {
             _layout = new HorizontalLayout(ThemeManager.Current, 300, LayoutMode.Taskbar, _cfg);

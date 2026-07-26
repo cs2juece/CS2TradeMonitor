@@ -591,11 +591,11 @@ namespace CS2TradeMonitor.src.UI.Framework
         private static void ApplyRuleInputState(LiteNumberInput input, bool enabled)
         {
             input.Enabled = true;
-            input.Inner.ReadOnly = !enabled;
-            input.TabStop = enabled;
-            input.Inner.TabStop = enabled;
-            input.Cursor = enabled ? Cursors.IBeam : Cursors.Default;
-            input.Inner.Cursor = enabled ? Cursors.IBeam : Cursors.Default;
+            input.Inner.ReadOnly = false;
+            input.TabStop = true;
+            input.Inner.TabStop = true;
+            input.Cursor = Cursors.IBeam;
+            input.Inner.Cursor = Cursors.IBeam;
             input.SetTextColor(enabled ? UIColors.TextMain : UIColors.TextSub);
         }
 

@@ -21,12 +21,15 @@ namespace CS2TradeMonitor.Application.Market
     {
         public string ItemId { get; set; } = "";
         public double Price { get; set; }
+        public double YouPinBidPrice { get; set; }
         public double Change { get; set; }
         public double ChangeRatio { get; set; }
         public long UpdateTime { get; set; }
+        public long YouPinBidUpdateTime { get; set; }
         public DateTime RetrievedAt { get; set; } = DateTime.Now;
         public bool IsStale { get; set; }
         public string Source { get; set; } = "未获取";
+        public string YouPinBidStatus { get; set; } = "未获取";
         public bool HasChangeData { get; set; } = false;
 
         public string FormatPrice() => Price.ToString("F2");

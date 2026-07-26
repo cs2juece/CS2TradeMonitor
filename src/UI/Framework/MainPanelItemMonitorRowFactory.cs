@@ -58,8 +58,9 @@ namespace CS2TradeMonitor.src.UI.Framework
             var status = new Label
             {
                 Text = item.LastPrice > 0
-                    ? $"当前 ¥{item.LastPrice:0.##}" + (item.HasChangeData ? $"  {item.LastChangeRatio:+0.##;-0.##;0}%" : "")
-                    : "暂无价格数据",
+                    ? $"当前 ¥{item.LastPrice:0.##}  {ItemMonitorPageModel.BuildYouPinBidText(item)}"
+                        + (item.HasChangeData ? $"  {item.LastChangeRatio:+0.##;-0.##;0}%" : "")
+                    : $"暂无价格数据  {ItemMonitorPageModel.BuildYouPinBidText(item)}",
                 AutoEllipsis = true,
                 Font = UIFonts.Regular(8.5f),
                 ForeColor = item.LastPrice > 0 ? UIColors.TextSub : UIColors.TextWarn,

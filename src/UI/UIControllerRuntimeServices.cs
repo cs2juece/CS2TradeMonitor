@@ -13,12 +13,14 @@ namespace CS2TradeMonitor
             ICs2UpdateReminderService cs2UpdateReminder,
             IMarketAlertService marketAlerts,
             IPhoneAlertDispatchService phoneAlerts,
+            IAlertHistoryStore alertHistory,
             IRenderScheduler renderScheduler,
             IInfoService infoService)
         {
             Cs2UpdateReminder = cs2UpdateReminder ?? throw new ArgumentNullException(nameof(cs2UpdateReminder));
             MarketAlerts = marketAlerts ?? throw new ArgumentNullException(nameof(marketAlerts));
             PhoneAlerts = phoneAlerts ?? throw new ArgumentNullException(nameof(phoneAlerts));
+            AlertHistory = alertHistory ?? throw new ArgumentNullException(nameof(alertHistory));
             RenderScheduler = renderScheduler ?? throw new ArgumentNullException(nameof(renderScheduler));
             InfoService = infoService ?? throw new ArgumentNullException(nameof(infoService));
         }
@@ -28,6 +30,8 @@ namespace CS2TradeMonitor
         public IMarketAlertService MarketAlerts { get; }
 
         public IPhoneAlertDispatchService PhoneAlerts { get; }
+
+        public IAlertHistoryStore AlertHistory { get; }
 
         public IRenderScheduler RenderScheduler { get; }
 
@@ -46,6 +50,7 @@ namespace CS2TradeMonitor
                 provider.GetRequiredService<ICs2UpdateReminderService>(),
                 provider.GetRequiredService<IMarketAlertService>(),
                 provider.GetRequiredService<IPhoneAlertDispatchService>(),
+                provider.GetRequiredService<IAlertHistoryStore>(),
                 provider.GetRequiredService<IRenderScheduler>(),
                 provider.GetRequiredService<IInfoService>());
         }

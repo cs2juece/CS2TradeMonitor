@@ -9,11 +9,26 @@ public sealed record SteamDtCatalogItem(
     string Name,
     string MarketHashName);
 
+public sealed record SteamDtCatalogSearchResult(
+    IReadOnlyList<SteamDtCatalogItem> Items,
+    int TotalCount,
+    int Offset,
+    int Limit)
+{
+    public bool HasMore => Offset + Items.Count < TotalCount;
+}
+
 /// <summary>
 /// Immutable SteamDT item catalog. JSON parsing and search normalization happen once at load time.
 /// </summary>
 public sealed class SteamDtItemCatalog
 {
+    private static readonly (string Alias, string Canonical)[] SearchAliases =
+    [
+        ("m4a1消音型", "m4a1s"),
+        ("m4a1消音版", "m4a1s")
+    ];
+
     private readonly Entry[] _entries;
     private readonly IReadOnlyDictionary<string, SteamDtCatalogItem> _byItemId;
     private readonly IReadOnlyDictionary<string, SteamDtCatalogItem> _byMarketHashName;
@@ -99,19 +114,36 @@ public sealed class SteamDtItemCatalog
 
     public IReadOnlyList<SteamDtCatalogItem> Search(string? keyword, int limit = 30)
     {
-        string[] parts = GetNormalizedParts(keyword);
-        if (parts.Length == 0 || _entries.Length == 0)
-            return [];
+        return SearchPage(keyword, limit).Items;
+    }
 
+    public SteamDtCatalogSearchResult SearchPage(
+        string? keyword,
+        int limit = 30,
+        int offset = 0)
+    {
+        string[] parts = GetNormalizedParts(keyword);
         int safeLimit = Math.Clamp(limit, 1, 100);
-        return _entries
+        int safeOffset = Math.Max(0, offset);
+        if (parts.Length == 0 || _entries.Length == 0)
+            return new SteamDtCatalogSearchResult([], 0, safeOffset, safeLimit);
+
+        Entry[] matches = _entries
             .Where(entry => parts.All(entry.Contains))
             .OrderBy(entry => entry.MatchRank(parts))
             .ThenBy(entry => entry.Item.Name.Length)
             .ThenBy(entry => entry.Item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        SteamDtCatalogItem[] items = matches
+            .Skip(safeOffset)
             .Take(safeLimit)
             .Select(entry => entry.Item)
             .ToArray();
+        return new SteamDtCatalogSearchResult(
+            items,
+            matches.Length,
+            safeOffset,
+            safeLimit);
     }
 
     public SteamDtCatalogItem? FindExact(
@@ -157,8 +189,8 @@ public sealed class SteamDtItemCatalog
         if (parts.Length == 0)
             return false;
 
-        string normalizedName = Normalize(name);
-        string normalizedHashName = Normalize(marketHashName);
+        string normalizedName = NormalizeSearchText(name);
+        string normalizedHashName = NormalizeSearchText(marketHashName);
         return parts.All(part => normalizedName.Contains(part, StringComparison.Ordinal)
             || normalizedHashName.Contains(part, StringComparison.Ordinal));
     }
@@ -185,11 +217,50 @@ public sealed class SteamDtItemCatalog
     {
         if (string.IsNullOrWhiteSpace(keyword))
             return [];
-        return keyword
+        string[] normalizedParts = keyword
             .Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
             .Select(Normalize)
             .Where(static part => part.Length > 0)
             .ToArray();
+        var searchParts = new List<string>(normalizedParts.Length);
+        for (int index = 0; index < normalizedParts.Length; index++)
+        {
+            string current = normalizedParts[index];
+            string canonicalCurrent = CanonicalizeSearchAliases(current);
+            if (!canonicalCurrent.Equals(current, StringComparison.Ordinal))
+            {
+                searchParts.Add(canonicalCurrent);
+                continue;
+            }
+
+            if (index + 1 < normalizedParts.Length)
+            {
+                string combined = current + normalizedParts[index + 1];
+                string canonicalCombined = CanonicalizeSearchAliases(combined);
+                if (!canonicalCombined.Equals(combined, StringComparison.Ordinal))
+                {
+                    searchParts.Add(canonicalCombined);
+                    index++;
+                    continue;
+                }
+            }
+
+            searchParts.Add(current);
+        }
+
+        return searchParts.ToArray();
+    }
+
+    private static string NormalizeSearchText(string? text)
+    {
+        return CanonicalizeSearchAliases(Normalize(text));
+    }
+
+    private static string CanonicalizeSearchAliases(string normalized)
+    {
+        foreach ((string alias, string canonical) in SearchAliases)
+            normalized = normalized.Replace(alias, canonical, StringComparison.Ordinal);
+        return normalized;
     }
 
     private static string ReadString(JsonElement element, params string[] names)
@@ -243,8 +314,8 @@ public sealed class SteamDtItemCatalog
         public Entry(SteamDtCatalogItem item)
         {
             Item = item;
-            _normalizedName = Normalize(item.Name);
-            _normalizedHashName = Normalize(item.MarketHashName);
+            _normalizedName = NormalizeSearchText(item.Name);
+            _normalizedHashName = NormalizeSearchText(item.MarketHashName);
         }
 
         public SteamDtCatalogItem Item { get; }

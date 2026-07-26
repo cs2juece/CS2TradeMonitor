@@ -7,11 +7,21 @@ const state = {
   activeSuggestion: -1,
   searchRequest: null,
   visibleCandles: [],
-  visibleIndicators: [],
-  chartMetrics: null,
   signals: [],
-  renderedRange: "30"
+  chartSignals: [],
+  renderedRange: "30",
+  catalog: null,
+  indicators: [],
+  pendingIndicators: [],
+  strategy: null,
+  pendingStrategy: null,
+  customStrategies: [],
+  parameterTargetId: null,
+  lastAnalyzeRequest: null
 };
+
+const PROFILE_STORAGE_KEY = "cs2-quant-research-profile-v1";
+const INDICATOR_LINE_COLORS = ["#4da3ff", "#f0b34b", "#a98cf5", "#ff6d75", "#5f8dff"];
 
 const elements = {
   form: document.getElementById("sourceForm"),
@@ -25,23 +35,66 @@ const elements = {
   sourceHint: document.getElementById("sourceHint"),
   analyzeButton: document.getElementById("analyzeButton"),
   exportLink: document.getElementById("exportLink"),
+  platformFee: document.getElementById("platformFeeInput"),
+  spreadBps: document.getElementById("spreadBpsInput"),
+  slippageBps: document.getElementById("slippageBpsInput"),
   message: document.getElementById("message"),
   workspace: document.getElementById("workspace"),
   serviceState: document.getElementById("serviceState"),
   summaryGrid: document.getElementById("summaryGrid"),
+  resultSummaryStatus: document.getElementById("resultSummaryStatus"),
+  resultSummaryGrid: document.getElementById("resultSummaryGrid"),
+  qualityPanel: document.getElementById("qualityPanel"),
+  qualityTitle: document.getElementById("qualityTitle"),
+  qualityDetails: document.getElementById("qualityDetails"),
+  executionCostPanel: document.getElementById("executionCostPanel"),
+  executionCostTitle: document.getElementById("executionCostTitle"),
+  executionCostDetails: document.getElementById("executionCostDetails"),
   seriesTitle: document.getElementById("seriesTitle"),
   seriesMeta: document.getElementById("seriesMeta"),
   range: document.getElementById("rangeSelect"),
-  canvas: document.getElementById("marketChart"),
-  tooltip: document.getElementById("chartTooltip"),
+  chart: document.getElementById("marketChart"),
+  chartWrap: document.getElementById("chartWrap"),
+  chartResetButton: document.getElementById("chartResetButton"),
+  chartFullscreenButton: document.getElementById("chartFullscreenButton"),
+  chartLegend: document.getElementById("chartLegend"),
   structureStats: document.getElementById("structureStats"),
   conclusions: document.getElementById("chanConclusions"),
   backtestGrid: document.getElementById("backtestGrid"),
+  walkForwardStatus: document.getElementById("walkForwardStatus"),
+  walkForwardGrid: document.getElementById("walkForwardGrid"),
   sideFilter: document.getElementById("sideFilter"),
   signalSearch: document.getElementById("signalSearch"),
   signalRows: document.getElementById("signalRows"),
   emptySignals: document.getElementById("emptySignals"),
-  methodNote: document.getElementById("methodNote")
+  methodNote: document.getElementById("methodNote"),
+  profileSummary: document.getElementById("profileSummary"),
+  indicatorSettingsButton: document.getElementById("indicatorSettingsButton"),
+  strategySettingsButton: document.getElementById("strategySettingsButton"),
+  chartIndicatorButton: document.getElementById("chartIndicatorButton"),
+  chartStrategyButton: document.getElementById("chartStrategyButton"),
+  tPlusSeven: document.getElementById("tPlusSevenToggle"),
+  backtestTitle: document.getElementById("backtestTitle"),
+  backtestNote: document.getElementById("backtestNote"),
+  indicatorDialog: document.getElementById("indicatorDialog"),
+  mainIndicatorList: document.getElementById("mainIndicatorList"),
+  subIndicatorList: document.getElementById("subIndicatorList"),
+  indicatorSelectionCount: document.getElementById("indicatorSelectionCount"),
+  saveIndicatorsButton: document.getElementById("saveIndicatorsButton"),
+  parameterDialog: document.getElementById("parameterDialog"),
+  parameterDialogTitle: document.getElementById("parameterDialogTitle"),
+  parameterFields: document.getElementById("parameterFields"),
+  parameterHint: document.getElementById("parameterHint"),
+  saveParametersButton: document.getElementById("saveParametersButton"),
+  strategyDialog: document.getElementById("strategyDialog"),
+  strategySelect: document.getElementById("strategySelect"),
+  strategyName: document.getElementById("strategyNameInput"),
+  strategyEditHint: document.getElementById("strategyEditHint"),
+  entryMatchMode: document.getElementById("entryMatchMode"),
+  exitMatchMode: document.getElementById("exitMatchMode"),
+  entryConditions: document.getElementById("entryConditions"),
+  exitConditions: document.getElementById("exitConditions"),
+  saveStrategyButton: document.getElementById("saveStrategyButton")
 };
 
 const sourceDescriptions = {
@@ -75,13 +128,48 @@ elements.form.addEventListener("submit", event => {
 elements.range.addEventListener("change", handleRangeChange);
 elements.sideFilter.addEventListener("change", renderSignalRows);
 elements.signalSearch.addEventListener("input", renderSignalRows);
-elements.canvas.addEventListener("mousemove", showChartTooltip);
-elements.canvas.addEventListener("mouseleave", () => { elements.tooltip.hidden = true; });
-window.addEventListener("resize", debounce(drawChart, 100));
+elements.signalRows.addEventListener("click", focusSignalOnChart);
+elements.signalRows.addEventListener("keydown", event => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  focusSignalOnChart(event);
+});
+elements.chartResetButton.addEventListener("click", () => window.QuantChart?.resetView());
+elements.chartFullscreenButton.addEventListener("click", toggleChartFullscreen);
+elements.exportLink.addEventListener("click", exportSignals);
+elements.indicatorSettingsButton.addEventListener("click", openIndicatorDialog);
+elements.chartIndicatorButton.addEventListener("click", openIndicatorDialog);
+elements.strategySettingsButton.addEventListener("click", openStrategyDialog);
+elements.chartStrategyButton.addEventListener("click", openStrategyDialog);
+elements.tPlusSeven.addEventListener("change", async () => {
+  persistProfile();
+  updateProfileSummary();
+  if (state.result) await loadAnalysis();
+});
+elements.mainIndicatorList.addEventListener("click", handleIndicatorListClick);
+elements.subIndicatorList.addEventListener("click", handleIndicatorListClick);
+elements.mainIndicatorList.addEventListener("change", handleIndicatorToggle);
+elements.subIndicatorList.addEventListener("change", handleIndicatorToggle);
+elements.saveIndicatorsButton.addEventListener("click", saveIndicators);
+elements.saveParametersButton.addEventListener("click", saveIndicatorParameters);
+elements.parameterDialog.addEventListener("close", () => {
+  if (elements.parameterDialog.returnValue !== "cancel" || elements.indicatorDialog.open) return;
+  state.parameterTargetId = null;
+  renderIndicatorLists();
+  elements.indicatorDialog.showModal();
+});
+elements.strategySelect.addEventListener("change", selectStrategyTemplate);
+elements.strategyDialog.addEventListener("click", handleStrategyClick);
+elements.strategyDialog.addEventListener("change", handleStrategyFieldChange);
+elements.strategyDialog.addEventListener("input", handleStrategyFieldChange);
+elements.saveStrategyButton.addEventListener("click", saveStrategy);
+window.addEventListener("resize", debounce(() => window.QuantChart?.resize(), 100));
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawChart);
+document.addEventListener("fullscreenchange", updateFullscreenButton);
 
 updateSourceUi();
 checkHealth();
+initializeResearchSettings();
 
 async function checkHealth() {
   try {
@@ -93,6 +181,64 @@ async function checkHealth() {
     elements.serviceState.className = "service-state error";
     elements.serviceState.lastElementChild.textContent = "本地服务不可用";
   }
+}
+
+async function initializeResearchSettings() {
+  try {
+    const response = await fetch("/api/research/catalog", { cache: "no-store" });
+    if (!response.ok) throw new Error(`配置目录读取失败（HTTP ${response.status}）`);
+    state.catalog = await response.json();
+    const saved = readStoredProfile();
+    state.indicators = clone(saved?.indicators?.length ? saved.indicators : state.catalog.defaultIndicators);
+    state.customStrategies = Array.isArray(saved?.customStrategies) ? saved.customStrategies : [];
+    elements.tPlusSeven.checked = saved?.lockMode === "TPlusSeven";
+    const strategies = availableStrategies();
+    state.strategy = clone(strategies.find(item => item.id === saved?.strategyId) || strategies[0] || null);
+    updateProfileSummary();
+  } catch (error) {
+    showMessage(error instanceof Error ? error.message : "研究配置读取失败。");
+  }
+}
+
+function readStoredProfile() {
+  try {
+    const value = localStorage.getItem(PROFILE_STORAGE_KEY);
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistProfile() {
+  try {
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      indicators: state.indicators,
+      customStrategies: state.customStrategies,
+      strategyId: state.strategy?.id || null,
+      lockMode: elements.tPlusSeven.checked ? "TPlusSeven" : "None"
+    }));
+  } catch {
+    showMessage("浏览器未允许保存研究配置，本次修改只在当前页面有效。");
+  }
+}
+
+function availableStrategies() {
+  return [...(state.catalog?.strategies || []), ...state.customStrategies];
+}
+
+function updateProfileSummary() {
+  if (!state.catalog) {
+    elements.profileSummary.textContent = "正在读取指标与策略目录…";
+    return;
+  }
+  const indicators = state.indicators.map(item => `${item.code}(${item.parameters.join(",")})`).join(" · ");
+  const lock = elements.tPlusSeven.checked ? "T+7 开启" : "T+7 关闭";
+  elements.profileSummary.textContent = `${indicators || "未选择指标"} · ${state.strategy?.name || "未选择策略"} · ${lock}`;
+}
+
+function clone(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
 function updateSourceUi() {
@@ -126,7 +272,7 @@ async function searchItems() {
   state.searchRequest = controller;
   setItemSearchStatus("正在搜索本地饰品库…", "loading");
   try {
-    const response = await fetch(`/api/items/search?q=${encodeURIComponent(query)}`, {
+    const response = await fetch(`/api/items/search?q=${encodeURIComponent(query)}&limit=100`, {
       cache: "no-store",
       signal: controller.signal
     });
@@ -139,16 +285,26 @@ async function searchItems() {
       throw new Error(detail);
     }
 
-    const results = await response.json();
+    const payload = await response.json();
     if (controller.signal.aborted || elements.itemSearch.value.trim() !== query) return;
-    state.itemResults = Array.isArray(results) ? results : [];
+    state.itemResults = Array.isArray(payload?.items) ? payload.items : [];
     state.activeSuggestion = state.itemResults.length > 0 ? 0 : -1;
     renderItemSuggestions();
     if (state.itemResults.length === 0) {
       setItemSearchStatus("未找到匹配单品，请尝试中文名或英文名。", "error");
       return;
     }
-    setItemSearchStatus(`找到 ${state.itemResults.length} 个结果，请选择单品。`, "success");
+    const totalCount = Number.isInteger(payload.totalCount)
+      ? payload.totalCount
+      : state.itemResults.length;
+    if (payload.hasMore) {
+      setItemSearchStatus(
+        `显示前 ${state.itemResults.length} 个结果（共 ${totalCount} 个），请继续输入缩小范围。`,
+        "success"
+      );
+    } else {
+      setItemSearchStatus(`找到 ${totalCount} 个结果，请选择单品。`, "success");
+    }
     openItemSuggestions();
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
@@ -242,21 +398,36 @@ function setItemSearchStatus(message, tone) {
 async function loadAnalysis() {
   hideMessage();
   disableExport();
-  const params = new URLSearchParams({ source: elements.source.value });
+  if (!state.catalog) {
+    showMessage("指标与策略目录尚未加载，请稍后重试。");
+    return false;
+  }
+  const request = {
+    source: elements.source.value,
+    range: elements.range.value,
+    indicators: state.indicators,
+    strategy: state.strategy,
+    lockMode: elements.tPlusSeven.checked ? "TPlusSeven" : "None"
+  };
   if (elements.source.value === "item") {
     if (!state.selectedItem) {
       showMessage("请先搜索并从候选列表中选择一个单品。");
       elements.itemSearch.focus();
       return;
     }
-    params.set("symbol", state.selectedItem.marketHashName);
-    params.set("range", elements.range.value);
+    request.symbol = state.selectedItem.marketHashName;
   }
-  if (elements.source.value === "csv") params.set("symbol", elements.symbol.value.trim());
+  if (elements.source.value === "csv") request.symbol = elements.symbol.value.trim();
+  appendCostInputs(request);
   setLoading(true);
 
   try {
-    const response = await fetch(`/api/analyze?${params}`, { cache: "no-store" });
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request)
+    });
     if (!response.ok) {
       let detail = `请求失败（HTTP ${response.status}）`;
       try {
@@ -267,10 +438,11 @@ async function loadAnalysis() {
     }
 
     state.result = await response.json();
+    state.lastAnalyzeRequest = request;
     state.renderedRange = elements.range.value;
     elements.workspace.hidden = false;
     renderWorkspace();
-    enableExport(`/api/export/signals.csv?${params}`);
+    enableExport();
     return true;
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "分析失败，请稍后重试。");
@@ -285,6 +457,9 @@ function setLoading(loading) {
   elements.workspace.setAttribute("aria-busy", String(loading));
   elements.analyzeButton.disabled = loading;
   elements.range.disabled = loading;
+  elements.platformFee.disabled = loading;
+  elements.spreadBps.disabled = loading;
+  elements.slippageBps.disabled = loading;
   elements.analyzeButton.textContent = loading ? "分析中…" : "开始分析";
 }
 
@@ -324,10 +499,38 @@ function disableExport() {
   elements.exportLink.setAttribute("aria-disabled", "true");
 }
 
-function enableExport(href) {
-  elements.exportLink.href = href;
+function enableExport() {
+  elements.exportLink.href = "#export";
   elements.exportLink.classList.remove("disabled");
   elements.exportLink.setAttribute("aria-disabled", "false");
+}
+
+async function exportSignals(event) {
+  event.preventDefault();
+  if (!state.lastAnalyzeRequest || elements.exportLink.classList.contains("disabled")) return;
+  try {
+    const response = await fetch("/api/export/signals.csv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state.lastAnalyzeRequest)
+    });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null);
+      throw new Error(problem?.detail || `导出失败（HTTP ${response.status}）`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const fileName = encodedName ? decodeURIComponent(encodedName) : `${state.result?.symbol || "research"}-signals.csv`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showMessage(error instanceof Error ? error.message : "导出失败。");
+  }
 }
 
 function renderWorkspace() {
@@ -337,14 +540,440 @@ function renderWorkspace() {
   elements.seriesMeta.textContent = `${sourceName(result.source)} · ${result.summary.startDate} 至 ${result.summary.endDate} · ${result.summary.candleCount} 根${interval}`;
   elements.methodNote.textContent = result.methodNote;
   renderSummary(result.summary, interval);
+  renderResearchResultSummary(result.resultSummary);
+  renderQuality(result.quality);
+  renderExecutionCosts(result.executionCosts);
+  renderChartLegend(result.indicatorSeries);
+  const locked = result.lockMode === "TPlusSeven";
+  elements.backtestTitle.textContent = locked ? "T+7 执行回测" : "普通执行回测";
+  elements.backtestNote.textContent = locked
+    ? "信号在下一根 K 线开盘执行；买入后锁定 7 天，锁定期卖出只记录不成交。已计点差、滑点和卖出方平台手续费，样本结束不强制平仓。"
+    : "信号在下一根 K 线开盘执行；T+7 当前关闭，卖出不受持有天数限制。已计点差、滑点和卖出方平台手续费，样本结束不强制平仓。";
   renderStructure(result.chan);
   renderBacktests(result.backtests);
+  renderWalkForward(result.walkForward);
   state.signals = [
     ...result.strategySignals.map(signal => ({ ...signal, category: "策略" })),
     ...result.chan.signals.map(signal => ({ ...signal, category: "缠论" }))
   ].sort((a, b) => b.date.localeCompare(a.date));
+  state.chartSignals = [
+    ...state.signals,
+    ...buildExecutionSignals(result.backtests)
+  ];
   renderSignalRows();
   requestAnimationFrame(drawChart);
+}
+
+function renderChartLegend(indicatorSeries) {
+  const indicatorItems = (indicatorSeries || [])
+    .filter(series => series.available && series.placement === "Main")
+    .flatMap(series => (series.outputs || []).map((output, index) =>
+      `<span><i class="legend-line" style="background:${INDICATOR_LINE_COLORS[index % INDICATOR_LINE_COLORS.length]}"></i>${escapeHtml(output.label)}</span>`));
+  elements.chartLegend.innerHTML = `${indicatorItems.join("")}
+    <span><i class="legend-line stroke"></i>缠论笔</span>
+    <span><i class="legend-line segment"></i>线段</span>
+    <span><i class="legend-box center"></i>中枢</span>
+    <span><i class="legend-dot fractal"></i>分型</span>
+    <span><i class="legend-badge signal">买</i>研究信号</span>`;
+}
+
+function appendCostInputs(request) {
+  const costFields = [
+    ["platformFeePercent", elements.platformFee],
+    ["spreadBps", elements.spreadBps],
+    ["slippageBps", elements.slippageBps]
+  ];
+  for (const [name, input] of costFields) {
+    const value = input.value.trim();
+    if (value !== "") request[name] = Number(value);
+  }
+}
+
+function buildExecutionSignals(backtests) {
+  const activeName = state.result?.activeStrategy?.name;
+  const active = (backtests || []).find(item => item.strategy === activeName);
+  if (!active) return [];
+  return (active.executions || []).flatMap((execution, index) => {
+    const points = [{
+      date: execution.buyDate,
+      price: execution.buyPrice,
+      side: "Buy",
+      chartLabel: "买入成交",
+      reason: `第 ${index + 1} 笔策略执行`
+    }];
+    if (execution.sellDate && execution.sellPrice != null) {
+      points.push({
+        date: execution.sellDate,
+        price: execution.sellPrice,
+        side: "Sell",
+        chartLabel: "卖出成交",
+        reason: execution.exitReason
+      });
+    }
+    return points;
+  });
+}
+
+function openIndicatorDialog() {
+  if (!state.catalog) {
+    showMessage("指标目录尚未加载，请稍后重试。");
+    return;
+  }
+  state.pendingIndicators = clone(state.indicators);
+  renderIndicatorLists();
+  elements.indicatorDialog.showModal();
+}
+
+function renderIndicatorLists() {
+  renderIndicatorList(elements.mainIndicatorList, "Main");
+  renderIndicatorList(elements.subIndicatorList, "Sub");
+  elements.indicatorSelectionCount.textContent = `已选择 ${state.pendingIndicators.length} / 12`;
+}
+
+function renderIndicatorList(container, placement) {
+  const definitions = (state.catalog?.indicators || []).filter(item => item.placements.includes(placement));
+  container.innerHTML = definitions.map(definition => {
+    const selection = state.pendingIndicators.find(item => item.code === definition.code && item.placement === placement);
+    const status = selection ? selection.parameters.join(", ") : "未启用";
+    return `<div class="indicator-row">
+      <label>
+        <input class="indicator-toggle" type="checkbox" data-code="${escapeHtml(definition.code)}" data-placement="${placement}" ${selection ? "checked" : ""}>
+        <span><strong>${escapeHtml(definition.name)}</strong><small>${escapeHtml(status)}</small></span>
+      </label>
+      <button class="parameter-button" type="button" data-indicator-id="${escapeHtml(selection?.id || "")}" ${selection ? "" : "disabled"}>参数</button>
+    </div>`;
+  }).join("");
+}
+
+function handleIndicatorToggle(event) {
+  const input = event.target.closest(".indicator-toggle");
+  if (!input) return;
+  const code = input.dataset.code;
+  const placement = input.dataset.placement;
+  const existing = state.pendingIndicators.findIndex(item => item.code === code && item.placement === placement);
+  if (input.checked && existing < 0) {
+    if (state.pendingIndicators.length >= 12) {
+      input.checked = false;
+      elements.indicatorSelectionCount.textContent = "最多同时启用 12 个指标。";
+      return;
+    }
+    const definition = indicatorDefinition(code);
+    state.pendingIndicators.push({
+      id: indicatorInstanceId(code, placement),
+      code,
+      placement,
+      parameters: definition.parameters.map(item => item.defaultValue)
+    });
+  } else if (!input.checked && existing >= 0) {
+    state.pendingIndicators.splice(existing, 1);
+  }
+  renderIndicatorLists();
+}
+
+function handleIndicatorListClick(event) {
+  const button = event.target.closest("[data-indicator-id]");
+  if (!button || !button.dataset.indicatorId) return;
+  state.parameterTargetId = button.dataset.indicatorId;
+  const selection = state.pendingIndicators.find(item => item.id === state.parameterTargetId);
+  const definition = selection && indicatorDefinition(selection.code);
+  if (!selection || !definition) return;
+  elements.parameterDialogTitle.textContent = `${definition.code} 参数`;
+  elements.parameterHint.textContent = definition.description;
+  elements.parameterFields.innerHTML = definition.parameters.map((parameter, index) => `
+    <label>
+      <span>${escapeHtml(parameter.label)}</span>
+      <input type="number" data-parameter-index="${index}" min="${parameter.minimum}" max="${parameter.maximum}" step="${parameter.decimalPlaces > 0 ? Math.pow(10, -parameter.decimalPlaces) : 1}"
+             value="${selection.parameters[index] ?? ""}" placeholder="可留空">
+    </label>`).join("");
+  elements.indicatorDialog.close();
+  elements.parameterDialog.returnValue = "";
+  elements.parameterDialog.showModal();
+}
+
+function saveIndicatorParameters(event) {
+  event.preventDefault();
+  const selection = state.pendingIndicators.find(item => item.id === state.parameterTargetId);
+  if (!selection) return;
+  const values = [...elements.parameterFields.querySelectorAll("input")]
+    .map(input => input.value.trim() === "" ? null : Number(input.value))
+    .filter(value => value != null);
+  if (values.length === 0 || values.some(value => !Number.isFinite(value))) {
+    elements.parameterHint.textContent = "至少保留一个有效参数。";
+    return;
+  }
+  selection.parameters = values;
+  elements.parameterDialog.close();
+  renderIndicatorLists();
+  elements.indicatorDialog.showModal();
+}
+
+async function saveIndicators(event) {
+  event.preventDefault();
+  if (state.pendingIndicators.length === 0) {
+    elements.indicatorSelectionCount.textContent = "至少保留一个指标。";
+    return;
+  }
+  state.indicators = clone(state.pendingIndicators);
+  persistProfile();
+  updateProfileSummary();
+  elements.indicatorDialog.close();
+  if (state.result) await loadAnalysis();
+}
+
+function indicatorDefinition(code) {
+  return state.catalog?.indicators.find(item => item.code === code);
+}
+
+function indicatorInstanceId(code, placement) {
+  return `${String(code).toLowerCase()}-${String(placement).toLowerCase()}`;
+}
+
+function openStrategyDialog() {
+  if (!state.catalog) {
+    showMessage("策略目录尚未加载，请稍后重试。");
+    return;
+  }
+  const strategies = availableStrategies();
+  state.pendingStrategy = clone(state.strategy || strategies[0]);
+  elements.strategySelect.innerHTML = strategies.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === state.pendingStrategy?.id ? "selected" : ""}>${escapeHtml(item.name)}${item.isBuiltIn ? "（内置）" : "（我的）"}</option>`).join("");
+  renderStrategyEditor();
+  elements.strategyDialog.showModal();
+}
+
+function selectStrategyTemplate() {
+  state.pendingStrategy = clone(availableStrategies().find(item => item.id === elements.strategySelect.value));
+  renderStrategyEditor();
+}
+
+function renderStrategyEditor() {
+  const strategy = state.pendingStrategy;
+  if (!strategy) return;
+  elements.strategyName.value = strategy.name;
+  elements.entryMatchMode.value = strategy.entry.matchMode;
+  elements.exitMatchMode.value = strategy.exit.matchMode;
+  elements.strategyEditHint.textContent = strategy.isBuiltIn
+    ? "内置策略保持只读；保存时会创建一个可继续修改的个人副本。"
+    : "当前是个人策略，保存会更新本地副本。";
+  elements.saveStrategyButton.textContent = strategy.isBuiltIn ? "保存为我的策略" : "保存修改";
+  renderConditions(elements.entryConditions, strategy.entry.conditions, "entry");
+  renderConditions(elements.exitConditions, strategy.exit.conditions, "exit");
+}
+
+function renderConditions(container, conditions, side) {
+  const references = strategyReferences();
+  container.innerHTML = conditions.map((condition, index) => {
+    const rightIsConstant = condition.constant != null || !condition.right;
+    return `<div class="condition-row" data-side="${side}" data-index="${index}">
+      <select data-role="left" aria-label="左侧指标">${referenceOptions(references, condition.left)}</select>
+      <select data-role="comparison" aria-label="比较方式">${comparisonOptions(condition.comparison)}</select>
+      <div class="condition-right">
+        <select data-role="right" aria-label="右侧指标或常数">
+          <option value="__constant__" ${rightIsConstant ? "selected" : ""}>常数</option>
+          ${referenceOptions(references, condition.right, !rightIsConstant)}
+        </select>
+        <input data-role="constant" type="number" step="0.0001" value="${condition.constant ?? ""}" placeholder="数值" ${rightIsConstant ? "" : "hidden"}>
+      </div>
+      <button class="condition-remove" type="button" data-remove-condition aria-label="删除条件">删除</button>
+    </div>`;
+  }).join("");
+}
+
+function strategyReferences() {
+  const references = [
+    ["candle.open", "开盘价"], ["candle.high", "最高价"], ["candle.low", "最低价"],
+    ["candle.close", "收盘价"], ["candle.volume", "成交量"], ["candle.turnover", "成交额"]
+  ];
+  for (const selection of strategyIndicatorSelections()) {
+    const definition = indicatorDefinition(selection.code);
+    if (!definition) continue;
+    const outputs = selection.code === "VOL" || selection.code === "TUR"
+      ? definition.outputs.slice(0, selection.parameters.length + 1)
+      : ["MA", "EMA", "EXPMA", "RSI", "BIAS", "WR"].includes(selection.code)
+        ? definition.outputs.slice(0, selection.parameters.length)
+        : definition.outputs;
+    outputs.forEach((output, index) => references.push([
+      `${selection.id}.${output.key}`,
+      `${selection.code} · ${indicatorOutputLabel(selection, output, index)}`
+    ]));
+  }
+  return references;
+}
+
+function strategyIndicatorSelections() {
+  const selections = [...state.indicators, ...(state.pendingStrategy?.indicators || [])];
+  return selections.filter((selection, index) =>
+    selections.findIndex(candidate => candidate.id === selection.id) === index);
+}
+
+function referencedIndicatorIds(strategy) {
+  const ids = new Set();
+  const conditions = [...strategy.entry.conditions, ...strategy.exit.conditions];
+  for (const condition of conditions) {
+    for (const reference of [condition.left, condition.right]) {
+      if (!reference || reference.startsWith("candle.")) continue;
+      const separator = reference.lastIndexOf(".");
+      if (separator > 0) ids.add(reference.slice(0, separator));
+    }
+  }
+  return ids;
+}
+
+function indicatorOutputLabel(selection, output, index) {
+  if (["MA", "EMA", "EXPMA", "RSI", "BIAS", "WR"].includes(selection.code))
+    return `${selection.code}${formatIndicatorParameter(selection.parameters[index])}`;
+  if (selection.code === "VOL" || selection.code === "TUR") {
+    if (index === 0) return selection.code;
+    return `${selection.code === "VOL" ? "MAVOL" : "MATUR"}${formatIndicatorParameter(selection.parameters[index - 1])}`;
+  }
+  return output.label;
+}
+
+function formatIndicatorParameter(value) {
+  return Number(value).toLocaleString("en-US", { maximumFractionDigits: 2, useGrouping: false });
+}
+
+function referenceOptions(references, selected, forceSelected = true) {
+  return references.map(([value, label]) => `<option value="${escapeHtml(value)}" ${forceSelected && value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+}
+
+function comparisonOptions(selected) {
+  const options = [
+    ["GreaterThan", ">"], ["LessThan", "<"], ["GreaterThanOrEqual", ">="],
+    ["LessThanOrEqual", "<="], ["CrossAbove", "上穿"], ["CrossBelow", "下穿"]
+  ];
+  return options.map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function handleStrategyClick(event) {
+  const add = event.target.closest("[data-side]");
+  if (add?.classList.contains("condition-add")) {
+    const rules = add.dataset.side === "entry" ? state.pendingStrategy.entry : state.pendingStrategy.exit;
+    if (rules.conditions.length >= 12) {
+      elements.strategyEditHint.textContent = "每组最多 12 个条件。";
+      return;
+    }
+    rules.conditions.push({ left: "candle.close", comparison: "GreaterThan", constant: 0 });
+    renderStrategyEditor();
+    return;
+  }
+  const remove = event.target.closest("[data-remove-condition]");
+  if (!remove) return;
+  const row = remove.closest(".condition-row");
+  const rules = row.dataset.side === "entry" ? state.pendingStrategy.entry : state.pendingStrategy.exit;
+  if (rules.conditions.length <= 1) {
+    elements.strategyEditHint.textContent = "买入和卖出规则至少各保留一个条件。";
+    return;
+  }
+  rules.conditions.splice(Number(row.dataset.index), 1);
+  renderStrategyEditor();
+}
+
+function handleStrategyFieldChange(event) {
+  if (!state.pendingStrategy) return;
+  if (event.target === elements.strategyName) state.pendingStrategy.name = elements.strategyName.value;
+  if (event.target === elements.entryMatchMode) state.pendingStrategy.entry.matchMode = elements.entryMatchMode.value;
+  if (event.target === elements.exitMatchMode) state.pendingStrategy.exit.matchMode = elements.exitMatchMode.value;
+  const row = event.target.closest(".condition-row");
+  if (!row) return;
+  const rules = row.dataset.side === "entry" ? state.pendingStrategy.entry : state.pendingStrategy.exit;
+  const condition = rules.conditions[Number(row.dataset.index)];
+  const role = event.target.dataset.role;
+  if (role === "left") condition.left = event.target.value;
+  if (role === "comparison") condition.comparison = event.target.value;
+  if (role === "right") {
+    const input = row.querySelector("[data-role=constant]");
+    const constant = event.target.value === "__constant__";
+    input.hidden = !constant;
+    condition.right = constant ? null : event.target.value;
+    condition.constant = constant ? Number(input.value || 0) : null;
+  }
+  if (role === "constant") condition.constant = event.target.value === "" ? null : Number(event.target.value);
+}
+
+async function saveStrategy(event) {
+  event.preventDefault();
+  const strategy = clone(state.pendingStrategy);
+  strategy.name = elements.strategyName.value.trim();
+  if (!strategy.name) {
+    elements.strategyEditHint.textContent = "策略名称不能为空。";
+    return;
+  }
+  const invalidConstant = [...elements.strategyDialog.querySelectorAll("[data-role=constant]:not([hidden])")]
+    .some(input => input.value.trim() === "" || !Number.isFinite(Number(input.value)));
+  if (invalidConstant) {
+    elements.strategyEditHint.textContent = "常数条件必须填写有效数值。";
+    return;
+  }
+  strategy.entry.matchMode = elements.entryMatchMode.value;
+  strategy.exit.matchMode = elements.exitMatchMode.value;
+  const requiredIds = referencedIndicatorIds(strategy);
+  const availableIndicators = strategyIndicatorSelections();
+  const requiredIndicators = availableIndicators.filter(selection => requiredIds.has(selection.id));
+  if (requiredIndicators.length !== requiredIds.size) {
+    elements.strategyEditHint.textContent = "策略引用了尚未启用的指标，请先在指标设置中启用。";
+    return;
+  }
+  const mergedIndicators = [...state.indicators, ...requiredIndicators].filter((selection, index, all) =>
+    all.findIndex(candidate => candidate.id === selection.id) === index);
+  if (mergedIndicators.length > 12) {
+    elements.strategyEditHint.textContent = "策略所需指标会超过 12 个上限，请先减少图表指标。";
+    return;
+  }
+  state.indicators = clone(mergedIndicators);
+  strategy.indicators = clone(requiredIndicators);
+  if (strategy.isBuiltIn) {
+    strategy.sourceStrategyId = strategy.id;
+    strategy.id = `user-${Date.now()}`;
+    strategy.isBuiltIn = false;
+  }
+  const index = state.customStrategies.findIndex(item => item.id === strategy.id);
+  if (index >= 0) state.customStrategies[index] = strategy;
+  else state.customStrategies.push(strategy);
+  state.strategy = strategy;
+  persistProfile();
+  updateProfileSummary();
+  elements.strategyDialog.close();
+  if (state.result) await loadAnalysis();
+}
+
+function renderQuality(quality) {
+  const warnings = Array.isArray(quality?.warnings) ? quality.warnings : [];
+  const isHealthy = quality?.isUsable && warnings.length === 0;
+  elements.qualityPanel.className = `quality-panel ${isHealthy ? "healthy" : "warning"}`;
+  elements.qualityTitle.textContent = isHealthy ? "数据质量检查通过" : "数据质量需要注意";
+  if (isHealthy) {
+    elements.qualityDetails.textContent = `${quality.validCandleCount} 根 K 线通过日期、OHLC、重复值和连续性检查。`;
+    return;
+  }
+
+  const messages = warnings.map(warning => `${warning.message}${warning.count > 1 ? `（${warning.count} 处）` : ""}`);
+  if (!quality?.isUsable) messages.unshift("有效 K 线数量不足，研究结果不可用。");
+  elements.qualityDetails.replaceChildren(...messages.map(message => {
+    const item = document.createElement("span");
+    item.textContent = message;
+    return item;
+  }));
+}
+
+function renderExecutionCosts(profile) {
+  const isComplete = Boolean(profile?.isComplete);
+  elements.executionCostPanel.className = `cost-profile-panel ${isComplete ? "complete" : "incomplete"}`;
+  elements.executionCostTitle.textContent = isComplete ? "执行成本已完整配置" : "执行成本存在缺失项";
+  const policy = profile?.baselinePolicy || {};
+  const missing = Array.isArray(profile?.missingInputs) && profile.missingInputs.length > 0
+    ? `缺失：${profile.missingInputs.join("、")}`
+    : "缺失：无";
+  const details = [
+    profile?.status || "成本状态不可用。",
+    missing,
+    `基准：卖出平台费 ${percent(Number(policy.platformFeeRate || 0) * 100)} · 价差 ${number(policy.spreadBps || 0)} bps · 滑点 ${number(policy.slippageBps || 0)} bps`,
+    profile?.source || ""
+  ].filter(Boolean);
+  elements.executionCostDetails.replaceChildren(...details.map(message => {
+    const item = document.createElement("span");
+    item.textContent = message;
+    return item;
+  }));
 }
 
 function renderSummary(summary, interval) {
@@ -364,11 +993,17 @@ function renderSummary(summary, interval) {
 }
 
 function renderStructure(chan) {
+  const pointCounts = Object.fromEntries([
+    ["FirstBuy", "一买"], ["FirstSell", "一卖"],
+    ["SecondBuy", "二买"], ["SecondSell", "二卖"],
+    ["ThirdBuy", "三买"], ["ThirdSell", "三卖"]
+  ].map(([type, label]) => [label, chan.signals.filter(signal => signal.chanType === type).length]));
   const stats = [
     ["分型", chan.fractals.length],
     ["笔", chan.strokes.length],
     ["线段", chan.segments.length],
-    ["中枢", chan.centers.length]
+    ["中枢", chan.centers.length],
+    ...Object.entries(pointCounts)
   ];
   elements.structureStats.innerHTML = stats.map(([label, value]) => `
     <div class="structure-stat"><strong>${value}</strong><span>${label}</span></div>`).join("");
@@ -380,16 +1015,90 @@ function renderStructure(chan) {
 }
 
 function renderBacktests(backtests) {
-  elements.backtestGrid.innerHTML = backtests.map(item => `
-    <section class="backtest-item">
+  elements.backtestGrid.innerHTML = backtests.map(item => {
+    const missingCosts = state.result?.executionCosts?.missingInputs || [];
+    const feeConfigured = !missingCosts.some(item => item.includes("平台手续费"));
+    const feeText = feeConfigured
+      ? percent(item.policy.platformFeeRate * 100)
+      : "未配置（按 0）";
+    if (!item.isAvailable) {
+      return `<section class="backtest-item unavailable">
+        <h3>${escapeHtml(item.strategy)}</h3>
+        <p class="backtest-status">${escapeHtml(item.status)}</p>
+      </section>`;
+    }
+
+    const sensitivity = Array.isArray(item.costSensitivity)
+      ? item.costSensitivity.map(scenario => `
+        <div class="cost-scenario ${scenario.code === "baseline" ? "baseline" : ""}">
+          <span>${escapeHtml(scenario.label)}</span>
+          <strong>${percent(combinedReturnPercent(scenario.totalReturnPercent, scenario.unrealizedReturnPercent))}</strong>
+          <small>成本影响 ${percent(-Number(scenario.costPercent))}</small>
+        </div>`).join("")
+      : "";
+    return `<section class="backtest-item">
       <h3>${escapeHtml(item.strategy)}</h3>
+      <p class="backtest-status">${escapeHtml(item.status)}</p>
       <div class="backtest-metrics">
-        <div><span>配对次数</span><strong>${item.tradeCount}</strong></div>
-        <div><span>累计收益</span><strong>${percent(item.totalReturnPercent)}</strong></div>
+        <div><span>已平仓</span><strong>${item.tradeCount}</strong></div>
+        <div><span>已实现净收益</span><strong>${percent(item.totalReturnPercent)}</strong></div>
+        <div><span>未实现净收益</span><strong>${percent(item.unrealizedReturnPercent)}</strong></div>
+        <div><span>交易成本影响</span><strong>${percent(-item.costPercent)}</strong></div>
         <div><span>胜率</span><strong>${percent(item.winRatePercent)}</strong></div>
+        <div><span>最大回撤</span><strong>${percent(item.maxDrawdownPercent)}</strong></div>
         <div><span>平均持有</span><strong>${item.averageHoldingDays.toFixed(1)} 天</strong></div>
+        <div><span>T+${item.policy.tradeLockDays} 受阻信号</span><strong>${item.blockedExitCount}</strong></div>
       </div>
-    </section>`).join("");
+      <p class="backtest-policy">下一根开盘 · 点差 ${item.policy.spreadBps} bps · 滑点 ${item.policy.slippageBps} bps · 卖出平台费 ${feeText}</p>
+      <div class="cost-sensitivity" aria-label="成本敏感性">${sensitivity}</div>
+    </section>`;
+  }).join("");
+}
+
+function renderResearchResultSummary(summary) {
+  const value = summary || {};
+  elements.resultSummaryStatus.textContent = value.status || "尚未生成结果摘要。";
+  const cards = [
+    ["可用策略", `${Number(value.availableStrategyCount || 0)} / ${Number(value.strategyCount || 0)}`, "完成有效回测"],
+    ["已平仓交易", Number(value.tradeCount || 0), "全部可用策略合计"],
+    ["最佳净收益", percent(value.bestNetReturnPercent || 0), escapeHtml(value.bestStrategy || "暂无")],
+    ["加权胜率", percent(value.weightedWinRatePercent || 0), "按已平仓交易数加权"],
+    ["最深回撤", percent(value.worstMaxDrawdownPercent || 0), "可用策略中的最差值"],
+    ["平均持有", `${Number(value.averageHoldingDays || 0).toFixed(1)} 天`, "按交易及未平仓仓位加权"],
+    ["成本压力", percent(value.worstCostScenarioReturnPercent || 0), "全部成本情景最低净收益"],
+    ["样本外稳定", Number(value.stableStrategyCount || 0), "稳定候选策略数"]
+  ];
+  elements.resultSummaryGrid.innerHTML = cards.map(([label, metric, note]) => `
+    <div class="result-summary-metric">
+      <span>${label}</span>
+      <strong>${metric}</strong>
+      <small>${note}</small>
+    </div>`).join("");
+}
+
+function renderWalkForward(report) {
+  elements.walkForwardStatus.textContent = report?.status || "样本外验证不可用。";
+  const strategies = Array.isArray(report?.strategies) ? report.strategies : [];
+  elements.walkForwardGrid.innerHTML = strategies.map(strategy => {
+    const windows = Array.isArray(strategy.windows) ? strategy.windows : [];
+    const rows = windows.map(window => `
+      <tr>
+        <td>窗口 ${window.sequence}</td>
+        <td>${escapeHtml(window.validationStartDate)} 至 ${escapeHtml(window.validationEndDate)}</td>
+        <td>${percent(window.validation.netReturnPercent)}</td>
+        <td>${escapeHtml(window.testStartDate)} 至 ${escapeHtml(window.testEndDate)}</td>
+        <td>${percent(window.test.netReturnPercent)}</td>
+        <td><span class="window-result ${window.passed ? "pass" : window.isEvaluated ? "fail" : "unknown"}">${window.passed ? "通过" : window.isEvaluated ? "未通过" : "不可判定"}</span></td>
+      </tr>`).join("");
+    return `<section class="walk-forward-item ${strategy.isStable ? "stable" : ""}">
+      <header>
+        <div><h3>${escapeHtml(strategy.strategy)}</h3><p>${escapeHtml(strategy.status)}</p></div>
+        <strong>${strategy.isStable ? "稳定候选" : strategy.isAvailable ? "研究观察" : "不可判定"}</strong>
+      </header>
+      <div class="walk-forward-counts">已评估 ${strategy.evaluatedWindowCount} 个窗口 · 通过 ${strategy.passedWindowCount} 个</div>
+      ${rows ? `<div class="walk-forward-table-wrap"><table><thead><tr><th>窗口</th><th>验证区间</th><th>验证净值</th><th>测试区间</th><th>测试净值</th><th>结果</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+    </section>`;
+  }).join("");
 }
 
 function renderSignalRows() {
@@ -397,14 +1106,14 @@ function renderSignalRows() {
   const query = elements.signalSearch.value.trim().toLocaleLowerCase("zh-CN");
   const rows = state.signals.filter(signal => {
     const sideMatches = side === "all" || signal.side === side;
-    const textMatches = !query || `${signal.strategy} ${signal.reason} ${signal.category}`.toLocaleLowerCase("zh-CN").includes(query);
+    const textMatches = !query || `${signal.strategy} ${signal.reason} ${signal.category} ${signal.level}`.toLocaleLowerCase("zh-CN").includes(query);
     return sideMatches && textMatches;
   }).slice(0, 80);
 
   elements.signalRows.innerHTML = rows.map(signal => `
-    <tr>
-      <td data-label="日期">${escapeHtml(signal.date)}</td>
-      <td data-label="策略"><strong>${escapeHtml(signal.strategy)}</strong><br><small>${escapeHtml(signal.category)}</small></td>
+    <tr data-date="${escapeHtml(signal.date)}" tabindex="0" title="点击定位到图表日期">
+      <td data-label="日期">${escapeHtml(signal.date)}${signal.availableDate !== signal.date ? `<br><small>确认 ${escapeHtml(signal.availableDate)}</small>` : ""}</td>
+      <td data-label="策略"><strong>${escapeHtml(signal.chanType ? signal.level : signal.strategy)}</strong><br><small>${escapeHtml(signal.category)} · ${escapeHtml(signal.strategy)}</small></td>
       <td data-label="方向"><span class="signal-side ${signal.side.toLowerCase()}">${sideName(signal.side)}</span></td>
       <td data-label="价格">${number(signal.price)}</td>
       <td data-label="触发原因">${escapeHtml(signal.reason)}</td>
@@ -416,61 +1125,23 @@ function drawChart() {
   if (!state.result) return;
   const start = getRangeStartIndex(state.result.candles, elements.range.value);
   state.visibleCandles = state.result.candles.slice(start);
-  state.visibleIndicators = state.result.indicators.slice(start);
-
-  const canvas = elements.canvas;
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width < 40 || rect.height < 40) return;
-  const ratio = Math.max(1, window.devicePixelRatio || 1);
-  canvas.width = Math.round(rect.width * ratio);
-  canvas.height = Math.round(rect.height * ratio);
-  const context = canvas.getContext("2d");
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);
-
-  const style = getComputedStyle(document.documentElement);
-  const colors = {
-    text: style.getPropertyValue("--subtle").trim(),
-    border: style.getPropertyValue("--border").trim(),
-    card: style.getPropertyValue("--card-muted").trim(),
-    positive: style.getPropertyValue("--positive").trim(),
-    negative: style.getPropertyValue("--negative").trim(),
-    marketRise: style.getPropertyValue("--market-rise").trim(),
-    marketFall: style.getPropertyValue("--market-fall").trim(),
-    primary: style.getPropertyValue("--primary").trim()
-  };
-  const width = rect.width;
-  const height = rect.height;
-  const padding = { left: 58, right: 18, top: 16, bottom: 30 };
-  const macdHeight = Math.max(82, height * .2);
-  const gap = 26;
-  const priceBottom = height - padding.bottom - macdHeight - gap;
-  const plotWidth = width - padding.left - padding.right;
-  const priceHeight = priceBottom - padding.top;
-  const candles = state.visibleCandles;
-  const values = candles.flatMap(candle => [candle.high, candle.low]);
-  const priceMin = Math.min(...values);
-  const priceMax = Math.max(...values);
-  const pricePad = Math.max((priceMax - priceMin) * .08, priceMax * .005);
-  const lower = priceMin - pricePad;
-  const upper = priceMax + pricePad;
-  const step = plotWidth / Math.max(candles.length, 1);
-  const xAt = index => padding.left + (index + .5) * step;
-  const yAt = price => padding.top + (upper - price) / Math.max(upper - lower, .0001) * priceHeight;
-
-  context.clearRect(0, 0, width, height);
-  context.fillStyle = colors.card;
-  context.fillRect(0, 0, width, height);
-  drawGrid(context, padding, width, priceBottom, lower, upper, colors, yAt);
-  drawCenters(context, state.result.chan.centers, start, candles.length, xAt, yAt, colors.primary, priceBottom);
-  drawCandles(context, candles, step, xAt, yAt, colors);
-  drawAverage(context, state.visibleIndicators, "ma5", "#4da3ff", xAt, yAt);
-  drawAverage(context, state.visibleIndicators, "ma10", "#f0b34b", xAt, yAt);
-  drawAverage(context, state.visibleIndicators, "ma20", "#a98cf5", xAt, yAt);
-  drawStrokes(context, state.result.chan.strokes, start, candles.length, xAt, yAt);
-  drawMacd(context, state.visibleIndicators, padding, width, height, macdHeight, step, xAt, colors);
-  drawDates(context, candles, padding, width, height, xAt, colors.text);
-
-  state.chartMetrics = { rect, start, step, xAt, yAt, priceBottom };
+  try {
+    window.QuantChart.render({
+      container: elements.chart,
+      symbol: state.result.symbol,
+      interval: state.result.interval,
+      candles: state.result.candles,
+      visibleCount: state.visibleCandles.length,
+      chan: state.result.chan,
+      signals: state.chartSignals,
+      indicatorSeries: state.result.indicatorSeries || []
+    });
+    elements.chart.classList.remove("chart-error");
+    elements.chart.removeAttribute("data-error");
+  } catch (error) {
+    elements.chart.classList.add("chart-error");
+    elements.chart.dataset.error = error instanceof Error ? error.message : "图表加载失败。";
+  }
 }
 
 function getRangeStartIndex(candles, rangeValue) {
@@ -494,162 +1165,27 @@ function intervalForRange(rangeValue) {
   return rangeValue === "730" || rangeValue === "all" ? "Week" : "Day";
 }
 
-function drawGrid(context, padding, width, priceBottom, lower, upper, colors, yAt) {
-  context.font = '11px "Microsoft YaHei UI", sans-serif';
-  context.textAlign = "right";
-  context.textBaseline = "middle";
-  for (let line = 0; line <= 5; line++) {
-    const value = lower + (upper - lower) * line / 5;
-    const y = yAt(value);
-    context.strokeStyle = colors.border;
-    context.globalAlpha = .55;
-    context.beginPath();
-    context.moveTo(padding.left, y);
-    context.lineTo(width - padding.right, y);
-    context.stroke();
-    context.globalAlpha = 1;
-    context.fillStyle = colors.text;
-    context.fillText(number(value), padding.left - 8, y);
-  }
-  context.strokeStyle = colors.border;
-  context.beginPath();
-  context.moveTo(padding.left, priceBottom);
-  context.lineTo(width - padding.right, priceBottom);
-  context.stroke();
+function focusSignalOnChart(event) {
+  const row = event.target.closest("tr[data-date]");
+  if (!row) return;
+  window.QuantChart?.focusDate(row.dataset.date);
+  elements.chartWrap.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-function drawCandles(context, candles, step, xAt, yAt, colors) {
-  const bodyWidth = Math.max(2, Math.min(10, step * .62));
-  candles.forEach((candle, index) => {
-    const x = xAt(index);
-    const rising = candle.close >= candle.open;
-    context.strokeStyle = rising ? colors.marketRise : colors.marketFall;
-    context.fillStyle = rising ? colors.marketRise : colors.marketFall;
-    context.lineWidth = 1;
-    context.beginPath();
-    context.moveTo(x, yAt(candle.high));
-    context.lineTo(x, yAt(candle.low));
-    context.stroke();
-    const top = yAt(Math.max(candle.open, candle.close));
-    const bottom = yAt(Math.min(candle.open, candle.close));
-    const bodyHeight = Math.max(1.5, bottom - top);
-    if (rising) {
-      context.globalAlpha = .78;
-      context.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
-      context.globalAlpha = 1;
-    } else {
-      context.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
-    }
-  });
-}
-
-function drawAverage(context, indicators, field, color, xAt, yAt) {
-  context.strokeStyle = color;
-  context.lineWidth = 1.45;
-  context.beginPath();
-  let drawing = false;
-  indicators.forEach((point, index) => {
-    const value = point[field];
-    if (value == null) { drawing = false; return; }
-    if (!drawing) { context.moveTo(xAt(index), yAt(value)); drawing = true; }
-    else context.lineTo(xAt(index), yAt(value));
-  });
-  context.stroke();
-}
-
-function drawStrokes(context, strokes, start, visibleCount, xAt, yAt) {
-  context.strokeStyle = "#e75d86";
-  context.lineWidth = 2.1;
-  context.globalAlpha = .92;
-  for (const stroke of strokes) {
-    if (stroke.endIndex < start || stroke.startIndex >= start + visibleCount) continue;
-    const startIndex = stroke.startIndex - start;
-    const endIndex = stroke.endIndex - start;
-    if (startIndex < 0 || endIndex >= visibleCount) continue;
-    context.beginPath();
-    context.moveTo(xAt(startIndex), yAt(stroke.startPrice));
-    context.lineTo(xAt(endIndex), yAt(stroke.endPrice));
-    context.stroke();
-  }
-  context.globalAlpha = 1;
-}
-
-function drawCenters(context, centers, start, visibleCount, xAt, yAt, color, priceBottom) {
-  context.fillStyle = color;
-  context.strokeStyle = color;
-  for (const center of centers) {
-    const leftIndex = Math.max(center.startIndex - start, 0);
-    const rightIndex = Math.min(center.endIndex - start, visibleCount - 1);
-    if (rightIndex < 0 || leftIndex >= visibleCount) continue;
-    const left = xAt(leftIndex);
-    const right = xAt(rightIndex);
-    const top = Math.min(yAt(center.upper), priceBottom);
-    const bottom = Math.min(yAt(center.lower), priceBottom);
-    context.globalAlpha = .1;
-    context.fillRect(left, top, Math.max(2, right - left), Math.max(2, bottom - top));
-    context.globalAlpha = .48;
-    context.strokeRect(left, top, Math.max(2, right - left), Math.max(2, bottom - top));
-  }
-  context.globalAlpha = 1;
-}
-
-function drawMacd(context, indicators, padding, width, height, macdHeight, step, xAt, colors) {
-  const top = height - padding.bottom - macdHeight;
-  const bottom = height - padding.bottom;
-  const max = Math.max(...indicators.map(point => Math.abs(point.histogram)), .001);
-  const zero = top + macdHeight / 2;
-  context.fillStyle = colors.text;
-  context.font = '10px "Microsoft YaHei UI", sans-serif';
-  context.textAlign = "left";
-  context.fillText("MACD", padding.left, top - 7);
-  context.strokeStyle = colors.border;
-  context.beginPath();
-  context.moveTo(padding.left, zero);
-  context.lineTo(width - padding.right, zero);
-  context.stroke();
-  const barWidth = Math.max(1, Math.min(7, step * .55));
-  indicators.forEach((point, index) => {
-    const barHeight = Math.abs(point.histogram) / max * (macdHeight / 2 - 4);
-    context.fillStyle = point.histogram >= 0 ? colors.marketRise : colors.marketFall;
-    context.globalAlpha = .68;
-    context.fillRect(xAt(index) - barWidth / 2, point.histogram >= 0 ? zero - barHeight : zero, barWidth, barHeight);
-  });
-  context.globalAlpha = 1;
-  context.strokeStyle = colors.border;
-  context.strokeRect(padding.left, top, width - padding.left - padding.right, bottom - top);
-}
-
-function drawDates(context, candles, padding, width, height, xAt, color) {
-  if (!candles.length) return;
-  const marks = Math.min(5, candles.length);
-  context.fillStyle = color;
-  context.font = '10px "Microsoft YaHei UI", sans-serif';
-  context.textAlign = "center";
-  context.textBaseline = "bottom";
-  for (let mark = 0; mark < marks; mark++) {
-    const index = Math.round(mark * (candles.length - 1) / Math.max(marks - 1, 1));
-    context.fillText(candles[index].date.slice(5), xAt(index), height - 5);
+async function toggleChartFullscreen() {
+  try {
+    if (document.fullscreenElement === elements.chartWrap) await document.exitFullscreen();
+    else await elements.chartWrap.requestFullscreen();
+  } catch {
+    showMessage("浏览器未允许图表进入全屏模式。");
   }
 }
 
-function showChartTooltip(event) {
-  if (!state.chartMetrics || !state.visibleCandles.length) return;
-  const bounds = elements.canvas.getBoundingClientRect();
-  const mouseX = event.clientX - bounds.left;
-  const index = Math.max(0, Math.min(state.visibleCandles.length - 1,
-    Math.floor((mouseX - 58) / state.chartMetrics.step)));
-  const candle = state.visibleCandles[index];
-  const indicator = state.visibleIndicators[index];
-  elements.tooltip.innerHTML = `
-    <strong>${escapeHtml(candle.date)}</strong><br>
-    开 ${number(candle.open)}　高 ${number(candle.high)}<br>
-    低 ${number(candle.low)}　收 ${number(candle.close)}<br>
-    MA5 ${indicator.ma5 == null ? "—" : number(indicator.ma5)}　MACD ${number(indicator.histogram)}`;
-  elements.tooltip.hidden = false;
-  const left = Math.min(Math.max(event.clientX - bounds.left + 12, 8), bounds.width - 238);
-  const top = Math.min(Math.max(event.clientY - bounds.top + 12, 8), bounds.height - 112);
-  elements.tooltip.style.left = `${left}px`;
-  elements.tooltip.style.top = `${top}px`;
+function updateFullscreenButton() {
+  elements.chartFullscreenButton.textContent = document.fullscreenElement === elements.chartWrap
+    ? "退出全屏"
+    : "全屏图表";
+  requestAnimationFrame(() => window.QuantChart?.resize());
 }
 
 function sourceName(source) {
@@ -671,6 +1207,12 @@ function number(value) {
 function percent(value) {
   const numeric = Number(value);
   return `${numeric > 0 ? "+" : ""}${numeric.toFixed(2)}%`;
+}
+
+function combinedReturnPercent(realizedPercent, unrealizedPercent) {
+  const realizedMultiplier = 1 + Number(realizedPercent) / 100;
+  const unrealizedMultiplier = 1 + Number(unrealizedPercent) / 100;
+  return (realizedMultiplier * unrealizedMultiplier - 1) * 100;
 }
 
 function marketTone(value) { return Number(value) > 0 ? "market-rise" : Number(value) < 0 ? "market-fall" : ""; }

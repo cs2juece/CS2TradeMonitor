@@ -12,7 +12,8 @@ public sealed record SteamDtKlineCandle(
     double High,
     double Low,
     double Close,
-    double Volume = 0);
+    double Volume = 0,
+    double? Turnover = null);
 
 public sealed record SteamDtKlineSeries(
     string MarketHashName,
@@ -265,7 +266,10 @@ public static class SteamDtKlinePayloadParser
             candles.Max(candle => candle.High),
             candles.Min(candle => candle.Low),
             candles[^1].Close,
-            candles.Sum(candle => candle.Volume));
+            candles.Sum(candle => candle.Volume),
+            candles.Any(candle => candle.Turnover.HasValue)
+                ? candles.Sum(candle => candle.Turnover ?? 0)
+                : null);
     }
 
     private static void CollectStandaloneClosingPrices(
@@ -356,8 +360,11 @@ public static class SteamDtKlinePayloadParser
         }
 
         TryGetNumber(element, out double volume, "volume", "vol", "v", "tradeCount", "sellCount");
+        double? turnover = TryGetNumber(element, out double amount, "turnover", "amount", "tradeAmount", "transactionAmount")
+            ? amount
+            : null;
         sample = new ParsedCandle(
-            new SteamDtKlineCandle(date, open, high, low, close, volume),
+            new SteamDtKlineCandle(date, open, high, low, close, volume, turnover),
             sortKey);
         return true;
     }
@@ -378,6 +385,7 @@ public static class SteamDtKlinePayloadParser
         double low;
         double close;
         double volume;
+        double? turnover;
         if (values.Length == 5)
         {
             // SteamDT live tuples are [timestamp, open, close, high, low].
@@ -385,6 +393,7 @@ public static class SteamDtKlinePayloadParser
             high = numbers[2];
             low = numbers[3];
             volume = 0;
+            turnover = null;
         }
         else
         {
@@ -393,10 +402,11 @@ public static class SteamDtKlinePayloadParser
             low = numbers[2];
             close = numbers[3];
             volume = numbers[4] >= 0 ? numbers[4] : 0;
+            turnover = numbers.Length > 5 && numbers[5] >= 0 ? numbers[5] : null;
         }
 
         sample = new ParsedCandle(
-            new SteamDtKlineCandle(date, open, high, low, close, volume),
+            new SteamDtKlineCandle(date, open, high, low, close, volume, turnover),
             sortKey);
         return true;
     }
@@ -410,10 +420,12 @@ public static class SteamDtKlinePayloadParser
             && double.IsFinite(candle.Low)
             && double.IsFinite(candle.Close)
             && double.IsFinite(candle.Volume)
+            && (!candle.Turnover.HasValue || double.IsFinite(candle.Turnover.Value))
             && candle.High >= Math.Max(candle.Open, candle.Close)
             && candle.Low > 0
             && candle.Low <= Math.Min(candle.Open, candle.Close)
-            && candle.Volume >= 0;
+            && candle.Volume >= 0
+            && (!candle.Turnover.HasValue || candle.Turnover.Value >= 0);
     }
 
     private static bool TryGetNumber(JsonElement element, out double value, params string[] names)

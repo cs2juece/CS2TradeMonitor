@@ -1,6 +1,7 @@
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.Application.Abstractions;
+using CS2TradeMonitor.Application.Monitoring;
 using CS2TradeMonitor.Domain.YouPin;
 using System;
 using System.Collections.Concurrent;
@@ -697,7 +698,8 @@ namespace CS2TradeMonitor.Application.YouPin
                 AppNotificationSeverity.Info,
                 AppNotificationPlacement.BottomLeft,
                 playSound,
-                showToast: showBubble);
+                showToast: showBubble,
+                source: AlertHistorySources.Inventory);
         }
 
         private void NotifyStopProfitLossAlerts(List<YouPinStopProfitLossAlert> alerts)
@@ -723,7 +725,8 @@ namespace CS2TradeMonitor.Application.YouPin
                 AppNotificationSeverity.Warning,
                 AppNotificationPlacement.BottomLeft,
                 playSound,
-                showToast: showBubble);
+                showToast: showBubble,
+                source: AlertHistorySources.InventoryStopProfitLoss);
         }
 
         private void UpdateDaily(YouPinInventorySnapshot snapshot, YouPinInventoryTrendState? trendState = null)

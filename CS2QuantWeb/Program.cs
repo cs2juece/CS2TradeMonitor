@@ -12,6 +12,7 @@ builder.WebHost.UseUrls(
         Environment.GetEnvironmentVariable("CS2_QUANT_LISTEN_URL")));
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.AddSingleton<IExecutionCostModel, ResearchExecutionCostModel>();
 builder.Services.AddSingleton<IQuantResearchModule, QuantResearchModule>();
 builder.Services.AddSingleton<CsvSeriesAdapter>();
 builder.Services.AddSingleton<SteamDtItemCatalogProvider>();
@@ -41,6 +42,11 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "ok",
     service = "CS2QuantWeb",
+    credentialContractVersion = QuantResearchServerOptions.CredentialContractVersion,
+    steamDtConfigured = !string.IsNullOrWhiteSpace(
+        Environment.GetEnvironmentVariable("CS2_QUANT_STEAMDT_API_KEY")),
+    qaqConfigured = !string.IsNullOrWhiteSpace(
+        Environment.GetEnvironmentVariable("QAQ_API_KEY")),
     time = DateTimeOffset.UtcNow
 }));
 
@@ -53,12 +59,18 @@ app.MapGet("/api/sources", () => Results.Ok(new[]
 
 app.MapGet("/api/items/search", async (
     string? q,
+    int? limit,
+    int? offset,
     SteamDtItemCatalogProvider catalog,
     CancellationToken cancellationToken) =>
 {
     try
     {
-        IReadOnlyList<SteamDtCatalogItem> results = await catalog.SearchAsync(q, 20, cancellationToken);
+        SteamDtCatalogSearchResult results = await catalog.SearchAsync(
+            q,
+            limit ?? 100,
+            offset ?? 0,
+            cancellationToken);
         return Results.Ok(results);
     }
     catch (SeriesLoadException ex)
@@ -67,10 +79,55 @@ app.MapGet("/api/items/search", async (
     }
 });
 
+app.MapGet("/api/research/catalog", () => Results.Ok(new
+{
+    indicators = IndicatorCatalog.All,
+    defaultIndicators = IndicatorCatalog.DefaultSelections,
+    strategies = StrategyCatalog.BuiltIns,
+    defaultLockMode = ExecutionLockMode.None,
+    supportedComparisons = Enum.GetValues<StrategyComparison>()
+}));
+
+app.MapPost("/api/analyze", async (
+    AnalyzeRequest request,
+    MarketSeriesService seriesService,
+    IQuantResearchModule module,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        LoadedSeries loaded = await seriesService.LoadAsync(
+            request.Source,
+            request.Symbol,
+            request.Range,
+            cancellationToken);
+        QuantResearchResult result = module.Analyze(
+            loaded.Symbol,
+            loaded.Source,
+            loaded.Candles,
+            request.ToOptions()) with
+        {
+            Interval = loaded.Interval
+        };
+        return Results.Ok(result);
+    }
+    catch (SeriesLoadException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: ex.StatusCode, title: "数据读取失败");
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity, title: "分析输入无效");
+    }
+});
+
 app.MapGet("/api/analyze", async (
     string? source,
     string? symbol,
     string? range,
+    double? platformFeePercent,
+    double? spreadBps,
+    double? slippageBps,
     MarketSeriesService seriesService,
     IQuantResearchModule module,
     CancellationToken cancellationToken) =>
@@ -78,7 +135,11 @@ app.MapGet("/api/analyze", async (
     try
     {
         LoadedSeries loaded = await seriesService.LoadAsync(source, symbol, range, cancellationToken);
-        QuantResearchResult result = module.Analyze(loaded.Symbol, loaded.Source, loaded.Candles) with
+        ResearchAnalysisOptions options = BuildAnalysisOptions(
+            platformFeePercent,
+            spreadBps,
+            slippageBps);
+        QuantResearchResult result = module.Analyze(loaded.Symbol, loaded.Source, loaded.Candles, options) with
         {
             Interval = loaded.Interval
         };
@@ -98,6 +159,9 @@ app.MapGet("/api/export/signals.csv", async (
     string? source,
     string? symbol,
     string? range,
+    double? platformFeePercent,
+    double? spreadBps,
+    double? slippageBps,
     MarketSeriesService seriesService,
     IQuantResearchModule module,
     CancellationToken cancellationToken) =>
@@ -105,7 +169,44 @@ app.MapGet("/api/export/signals.csv", async (
     try
     {
         LoadedSeries loaded = await seriesService.LoadAsync(source, symbol, range, cancellationToken);
-        QuantResearchResult result = module.Analyze(loaded.Symbol, loaded.Source, loaded.Candles);
+        ResearchAnalysisOptions options = BuildAnalysisOptions(
+            platformFeePercent,
+            spreadBps,
+            slippageBps);
+        QuantResearchResult result = module.Analyze(loaded.Symbol, loaded.Source, loaded.Candles, options);
+        byte[] csv = BuildSignalCsv(result);
+        string safeName = string.Concat(result.Symbol.Select(character =>
+            Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+        return Results.File(csv, "text/csv; charset=utf-8", $"{safeName}-signals.csv");
+    }
+    catch (SeriesLoadException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: ex.StatusCode, title: "导出失败");
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity, title: "导出输入无效");
+    }
+});
+
+app.MapPost("/api/export/signals.csv", async (
+    AnalyzeRequest request,
+    MarketSeriesService seriesService,
+    IQuantResearchModule module,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        LoadedSeries loaded = await seriesService.LoadAsync(
+            request.Source,
+            request.Symbol,
+            request.Range,
+            cancellationToken);
+        QuantResearchResult result = module.Analyze(
+            loaded.Symbol,
+            loaded.Source,
+            loaded.Candles,
+            request.ToOptions());
         byte[] csv = BuildSignalCsv(result);
         string safeName = string.Concat(result.Symbol.Select(character =>
             Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
@@ -130,10 +231,21 @@ _ = QuantResearchParentProcessMonitor.RunAsync(
     app.Lifetime.ApplicationStopping);
 app.Run();
 
+static ResearchAnalysisOptions BuildAnalysisOptions(
+    double? platformFeePercent,
+    double? spreadBps,
+    double? slippageBps)
+{
+    return new ResearchAnalysisOptions(new ResearchCostInputs(
+        platformFeePercent / 100,
+        spreadBps,
+        slippageBps));
+}
+
 static byte[] BuildSignalCsv(QuantResearchResult result)
 {
     var builder = new StringBuilder();
-    builder.AppendLine("date,category,strategy,side,price,level,reason");
+    builder.AppendLine("date,available_date,category,strategy,side,price,level,chan_type,reason");
     IEnumerable<(string Category, ResearchSignal Signal)> rows = result.StrategySignals
         .Select(signal => ("strategy", signal))
         .Concat(result.Chan.Signals.Select(signal => ("chan", signal)))
@@ -141,11 +253,13 @@ static byte[] BuildSignalCsv(QuantResearchResult result)
     foreach (var row in rows)
     {
         builder.Append(row.Signal.Date.ToString("yyyy-MM-dd")).Append(',')
+            .Append(row.Signal.AvailableDate.ToString("yyyy-MM-dd")).Append(',')
             .Append(Escape(row.Category)).Append(',')
             .Append(Escape(row.Signal.Strategy)).Append(',')
             .Append(row.Signal.Side).Append(',')
             .Append(row.Signal.Price.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
             .Append(Escape(row.Signal.Level)).Append(',')
+            .Append(Escape(row.Signal.ChanType?.ToString() ?? string.Empty)).Append(',')
             .Append(Escape(row.Signal.Reason)).AppendLine();
     }
 
@@ -156,9 +270,28 @@ static string Escape(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 
 public partial class Program;
 
+public sealed record AnalyzeRequest(
+    string? Source,
+    string? Symbol,
+    string? Range,
+    double? PlatformFeePercent = null,
+    double? SpreadBps = null,
+    double? SlippageBps = null,
+    IReadOnlyList<IndicatorSelection>? Indicators = null,
+    StrategyDefinition? Strategy = null,
+    ExecutionLockMode LockMode = ExecutionLockMode.None)
+{
+    public ResearchAnalysisOptions ToOptions() => new(
+        new ResearchCostInputs(PlatformFeePercent / 100, SpreadBps, SlippageBps),
+        Indicators,
+        Strategy,
+        LockMode);
+}
+
 internal static class QuantResearchServerOptions
 {
     internal const string DefaultListenUrl = "http://127.0.0.1:5078";
+    internal const int CredentialContractVersion = 1;
 
     internal static string ResolveListenUrl(string? configured)
     {

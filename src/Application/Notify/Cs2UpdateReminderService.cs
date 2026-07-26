@@ -461,8 +461,19 @@ namespace CS2TradeMonitor.Application.Notify
             lock (_stateLock)
             {
                 _lastResult = result;
-                _recentItems = items.Take(1).ToList();
+                _recentItems = SelectRecentItems(items);
             }
+        }
+
+        internal static List<Cs2UpdateLogItem> SelectRecentItems(IReadOnlyList<Cs2UpdateLogItem> items)
+        {
+            ArgumentNullException.ThrowIfNull(items);
+            return items
+                .OrderByDescending(item => item.PublishedAt)
+                .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Take(10)
+                .ToList();
         }
 
         private void ScheduleNext(Settings cfg)

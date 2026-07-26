@@ -20,7 +20,7 @@
     <DebugType Condition="'$(CoverageBuild)' == 'true'">portable</DebugType>
     <DebugSymbols Condition="'$(CoverageBuild)' == 'true'">true</DebugSymbols>
 
-    <Version>1.36</Version><!-- 发布版本的唯一来源；程序集与文件版本由 SDK 派生。 -->
+    <Version>1.37</Version><!-- 发布版本的唯一来源；程序集与文件版本由 SDK 派生。 -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- Custom controls are composed entirely in code and are not serialized by the WinForms designer. -->
@@ -88,6 +88,9 @@
     <Compile Remove="CS2MarketData.Core\**" />
     <EmbeddedResource Remove="CS2MarketData.Core\**" />
     <None Remove="CS2MarketData.Core\**" />
+    <Compile Remove="scratch\**" />
+    <EmbeddedResource Remove="scratch\**" />
+    <None Remove="scratch\**" />
   </ItemGroup>
 
   <!-- 引入文件资源管理 -->
