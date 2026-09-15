@@ -1,1 +1,1 @@
-81dbc19917bdb8ae5ce19d2356ca8b97a632dfc5db3add00bdaec80677f2de74  CS2TradeMonitor_v1.37-win-x64.zip
+ef3e38d75f1405bd3c0c9affa9793af451c822d5e58912eb9ee7c31cd7ef897a  CS2TradeMonitor_v1.38-win-x64.zip
