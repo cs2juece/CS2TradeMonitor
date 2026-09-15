@@ -1,6 +1,8 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Principal;
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Infrastructure.Paths;
 using Microsoft.Win32;
@@ -12,62 +14,48 @@ namespace CS2TradeMonitor.src.SystemServices
     public static class AutoStart
     {
         private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const int ErrorCancelled = 1223;
         private static string TaskName => InstanceRuntimeContext.Current.BuildOsResourceName(InstanceResourceKind.AutoStart);
         internal static string CurrentRegistrationName => TaskName;
 
         public static bool Set(bool enabled, bool showErrorMessage = true)
         {
             string exePath = LauncherExecutablePath.GetCurrent();
+            bool runValueRemoved = DeleteRunValue(TaskName);
 
             if (enabled)
             {
-                if (IsRunValueForExe(TaskName, exePath))
-                {
-                    DeleteTaskIfExists(TaskName, logFailureAsError: false);
-                    return true;
-                }
-
-                if (SetRunValue(exePath))
-                {
-                    DeleteTaskIfExists(TaskName, logFailureAsError: false);
-                    DiagnosticsLogger.Info("AutoStart", "HKCU Run auto start was created. Scheduled task is no longer required.");
-                    return true;
-                }
+                if (IsScheduledTaskForCurrentExe(exePath))
+                    return runValueRemoved;
 
                 if (IsNetworkPath(exePath))
                 {
                     ShowError(
-                        "当前网络路径无法创建 HKCU Run 启动项，Windows 计划任务也不支持网络路径。此目录实例的开机启动未启用。",
+                        "Windows 计划任务不支持从网络路径启动。请将软件完整目录移动到本地硬盘后重试。",
                         showErrorMessage);
                     return false;
                 }
-
-                DiagnosticsLogger.Info("AutoStart", "HKCU Run auto start failed; trying scheduled task fallback.");
 
                 string tempXmlPath = RuntimeDataPaths.GetCacheFilePath($"autostart-task-{Guid.NewGuid():N}.xml");
 
                 try
                 {
-                    // 生成 XML 内容 (修改为获取 XDocument 对象)
-                    var doc = GetTaskXml(exePath);
+                    string? userSid = WindowsIdentity.GetCurrent().User?.Value;
+                    if (string.IsNullOrWhiteSpace(userSid))
+                    {
+                        ShowError("无法读取当前 Windows 用户身份，开机启动未启用。", showErrorMessage);
+                        return false;
+                    }
 
-                    // 写入临时文件 (修改为 doc.Save，它会自动处理 UTF-16 编码)
+                    var doc = GetTaskXml(exePath, userSid);
                     doc.Save(tempXmlPath);
 
-                    // 调用 schtasks 导入 XML
-                    // /F: 强制覆盖
-                    // /TN: 任务名
-                    // /XML: 指定配置文件
-                    var result = RunSchtasks($"/Create /TN \"{TaskName}\" /XML \"{tempXmlPath}\" /F");
+                    var result = RunSchtasksElevated($"/Create /TN \"{TaskName}\" /XML \"{tempXmlPath}\" /F");
                     if (!result.Success)
                     {
-                        string message = $"设置开机启动失败，schtasks 返回 {result.ExitCode}。{result.Output}".Trim();
-                        if (SetRunValue(exePath))
-                        {
-                            DiagnosticsLogger.Info("AutoStart", $"{message} HKCU Run fallback was created.");
-                            return true;
-                        }
-
+                        string message = result.ExitCode == ErrorCancelled
+                            ? "未获得 Windows 权限，开机启动保持关闭。"
+                            : $"设置开机启动失败，schtasks 返回 {result.ExitCode}。{result.Output}".Trim();
                         DiagnosticsLogger.Error("AutoStart", message);
                         ShowError(message, showErrorMessage);
                         return false;
@@ -75,36 +63,31 @@ namespace CS2TradeMonitor.src.SystemServices
 
                     if (!IsScheduledTaskForCurrentExe(exePath))
                     {
-                        string message = "开机启动任务已创建，但校验当前程序路径失败。请重新应用一次开机启动设置。";
-                        if (SetRunValue(exePath))
-                        {
-                            DiagnosticsLogger.Info("AutoStart", $"{message} HKCU Run fallback was created.");
-                            return true;
-                        }
-
+                        string message = "开机启动任务已创建，但校验失败。请重新开启一次开机启动。";
                         DiagnosticsLogger.Error("AutoStart", message);
                         ShowError(message, showErrorMessage);
                         return false;
                     }
 
-                    DeleteRunValue(TaskName);
+                    if (!runValueRemoved)
+                    {
+                        string message = "计划任务已创建，但旧注册表启动项清理失败。请重新开启一次开机启动。";
+                        DiagnosticsLogger.Error("AutoStart", message);
+                        ShowError(message, showErrorMessage);
+                        return false;
+                    }
+
+                    DiagnosticsLogger.Info("AutoStart", "Elevated logon task was created for the current portable instance.");
+                    return true;
                 }
                 catch (Exception ex)
                 {
-                    // 捕获所有 IO 或 进程异常
-                    if (SetRunValue(exePath))
-                    {
-                        DiagnosticsLogger.Info("AutoStart", $"Scheduled task exception; HKCU Run fallback was created. {ex.Message}");
-                        return true;
-                    }
-
                     DiagnosticsLogger.Error("AutoStart", "Setting auto start failed.", ex);
                     ShowError($"设置失败: {ex.Message}", showErrorMessage);
                     return false;
                 }
                 finally
                 {
-                    // 确保无论是否出错，都尝试清理临时文件
                     try
                     {
                         if (File.Exists(tempXmlPath)) File.Delete(tempXmlPath);
@@ -114,15 +97,26 @@ namespace CS2TradeMonitor.src.SystemServices
                         DiagnosticsLogger.Info("AutoStart", $"Ignored temp task XML cleanup failure: {ex.Message}");
                     }
                 }
+            }
 
-                return true;
-            }
-            else
+            if (!IsTaskRegistered(TaskName))
+                return runValueRemoved;
+
+            var deleteResult = RunSchtasksElevated($"/Delete /TN \"{TaskName}\" /F");
+            if (!deleteResult.Success)
             {
-                DeleteTaskIfExists(TaskName);
-                DeleteRunValue(TaskName);
-                return !IsEnabled();
+                string message = deleteResult.ExitCode == ErrorCancelled
+                    ? "未获得 Windows 权限，开机启动仍保持开启。"
+                    : $"关闭开机启动失败，schtasks 返回 {deleteResult.ExitCode}。{deleteResult.Output}".Trim();
+                DiagnosticsLogger.Error("AutoStart", message);
+                ShowError(message, showErrorMessage);
+                return false;
             }
+
+            bool disabled = !IsTaskRegistered(TaskName) && runValueRemoved;
+            if (disabled)
+                DiagnosticsLogger.Info("AutoStart", "Elevated logon task was removed for the current portable instance.");
+            return disabled;
         }
 
         public static bool IsEnabled()
@@ -152,11 +146,11 @@ namespace CS2TradeMonitor.src.SystemServices
                 bool taskCurrent = IsScheduledTaskForCurrentExe(exePath);
                 bool runAny = IsRunValueRegistered(TaskName);
                 bool taskAny = IsTaskRegistered(TaskName);
-                if (runCurrent)
-                    return "开机启动状态：HKCU Run 已指向当前程序。";
                 if (taskCurrent)
-                    return "开机启动状态：计划任务已指向当前程序（兼容模式）。";
-                if (runAny || taskAny)
+                    return "开机启动状态：计划任务已指向当前程序。";
+                if (runCurrent)
+                    return "开机启动状态：检测到旧启动项，请重新开启开机启动。";
+                if (taskAny || runAny)
                     return "开机启动状态：存在启动项但路径不是当前程序，请重新启用。";
                 return "开机启动状态：未启用。";
             }
@@ -173,7 +167,7 @@ namespace CS2TradeMonitor.src.SystemServices
             {
                 if (enabled)
                 {
-                    if (IsEnabledForCurrentExe()) return true;
+                    if (IsEnabledForCurrentExe() && !IsRunValueRegistered(TaskName)) return true;
                     return Set(true, showErrorMessage);
                 }
 
@@ -190,7 +184,7 @@ namespace CS2TradeMonitor.src.SystemServices
 
         private static bool IsEnabledForCurrentExe(string exePath)
         {
-            return IsRunValueForExe(TaskName, exePath) || IsScheduledTaskForCurrentExe(exePath);
+            return IsScheduledTaskForCurrentExe(exePath);
         }
 
         private static bool IsScheduledTaskForCurrentExe(string exePath)
@@ -232,20 +226,13 @@ namespace CS2TradeMonitor.src.SystemServices
             }
         }
 
-        /// <summary>
-        /// 生成 XML 配置：完美复刻原始逻辑 + 增加高级电池/延迟设置
-        /// (已重构为 XDocument 方式)
-        /// </summary>
-        private static XDocument GetTaskXml(string exePath)
+        /// <summary>生成当前用户的普通权限登录任务。</summary>
+        private static XDocument GetTaskXml(string exePath, string userSid)
         {
-            // 细节保留：获取工作目录，对应你原始代码的 /STRTIN
             string exeDir = Path.GetDirectoryName(exePath)!;
 
             XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
-            // 使用 XDocument 构建 XML
-            // 自动处理特殊字符转义（如路径中的 & ' 等）
-            // 自动处理编码声明 (UTF-16)
             var doc = new XDocument(
                 new XDeclaration("1.0", "UTF-16", null),
                 new XElement(ns + "Task",
@@ -256,12 +243,14 @@ namespace CS2TradeMonitor.src.SystemServices
                     new XElement(ns + "Triggers",
                         new XElement(ns + "LogonTrigger",
                             new XElement(ns + "Enabled", "true"),
-                            new XElement(ns + "Delay", "PT5S")
+                            new XElement(ns + "UserId", userSid),
+                            new XElement(ns + "Delay", "PT10S")
                         )
                     ),
                     new XElement(ns + "Principals",
                         new XElement(ns + "Principal",
                             new XAttribute("id", "Author"),
+                            new XElement(ns + "UserId", userSid),
                             new XElement(ns + "LogonType", "InteractiveToken"),
                             new XElement(ns + "RunLevel", "LeastPrivilege")
                         )
@@ -271,7 +260,7 @@ namespace CS2TradeMonitor.src.SystemServices
                         new XElement(ns + "DisallowStartIfOnBatteries", "false"),
                         new XElement(ns + "StopIfGoingOnBatteries", "false"),
                         new XElement(ns + "AllowHardTerminate", "true"),
-                        new XElement(ns + "StartWhenAvailable", "false"),
+                        new XElement(ns + "StartWhenAvailable", "true"),
                         new XElement(ns + "RunOnlyIfNetworkAvailable", "false"),
                         new XElement(ns + "IdleSettings",
                             new XElement(ns + "StopOnIdleEnd", "true"),
@@ -295,34 +284,6 @@ namespace CS2TradeMonitor.src.SystemServices
             );
 
             return doc;
-        }
-
-        private static void DeleteTaskIfExists(string taskName, bool logFailureAsError = true)
-        {
-            try
-            {
-                var result = RunSchtasks($"/Delete /TN \"{taskName}\" /F");
-                if (!result.Success)
-                {
-                    string message = $"Deleting task {taskName} failed. schtasks returned {result.ExitCode}. {result.Output}".Trim();
-
-                    if (!IsTaskRegistered(taskName))
-                        return;
-
-                    if (logFailureAsError)
-                    {
-                        DiagnosticsLogger.Error("AutoStart", message);
-                    }
-                    else
-                    {
-                        DiagnosticsLogger.Info("AutoStart", $"{message} Continuing with current startup configuration.");
-                    }
-                }
-            }
-            catch
-            {
-                // Startup cleanup must never block the application.
-            }
         }
 
         private static bool IsTaskRegistered(string taskName)
@@ -357,22 +318,6 @@ namespace CS2TradeMonitor.src.SystemServices
             }
         }
 
-        private static bool SetRunValue(string exePath)
-        {
-            try
-            {
-                using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
-                if (key == null) return false;
-                key.SetValue(TaskName, QuoteCommand(exePath), RegistryValueKind.String);
-                return IsRunValueForExe(TaskName, exePath);
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.Error("AutoStart", "Setting HKCU Run fallback failed.", ex);
-                return false;
-            }
-        }
-
         private static bool IsRunValueRegistered(string valueName)
         {
             try
@@ -401,22 +346,19 @@ namespace CS2TradeMonitor.src.SystemServices
             }
         }
 
-        private static void DeleteRunValue(string valueName)
+        private static bool DeleteRunValue(string valueName)
         {
             try
             {
                 using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
                 key?.DeleteValue(valueName, throwOnMissingValue: false);
+                return !IsRunValueRegistered(valueName);
             }
             catch (Exception ex)
             {
                 DiagnosticsLogger.Error("AutoStart", $"Deleting HKCU Run value {valueName} failed.", ex);
+                return false;
             }
-        }
-
-        private static string QuoteCommand(string exePath)
-        {
-            return $"\"{exePath.Replace("\"", "")}\"";
         }
 
         private static string? ExtractExePath(string? command)
@@ -460,6 +402,41 @@ namespace CS2TradeMonitor.src.SystemServices
             p.WaitForExit();
             string combined = string.Join(" ", new[] { output.Trim(), error.Trim() }.Where(s => !string.IsNullOrWhiteSpace(s)));
             return (p.ExitCode == 0, p.ExitCode, combined);
+        }
+
+        internal static ProcessStartInfo CreateElevatedSchtasksStartInfo(string arguments)
+        {
+            return new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = arguments,
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+        }
+
+        private static (bool Success, int ExitCode, string Output) RunSchtasksElevated(string arguments)
+        {
+            try
+            {
+                using Process? process = Process.Start(CreateElevatedSchtasksStartInfo(arguments));
+                if (process == null)
+                    return (false, -1, "无法启动 schtasks.exe");
+
+                process.WaitForExit();
+                return process.ExitCode == 0
+                    ? (true, 0, string.Empty)
+                    : (false, process.ExitCode, "计划任务命令执行失败。");
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorCancelled)
+            {
+                return (false, ErrorCancelled, "用户取消了 Windows 权限请求。");
+            }
+            catch (Exception ex)
+            {
+                return (false, -1, ex.Message);
+            }
         }
 
         private static void ShowError(string message, bool showErrorMessage)

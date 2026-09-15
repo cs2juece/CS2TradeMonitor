@@ -1,4 +1,3 @@
-using CS2TradeMonitor.src.SystemServices;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -28,11 +27,13 @@ namespace CS2TradeMonitor.Application.Market
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                string? path = FindLocalItemsFilePath();
-                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                using Stream? file = typeof(SteamDtLocalItemNameResolver).Assembly.GetManifestResourceStream(
+                    "CS2TradeMonitor.Shared.Resources.steamdt_items.json.gz");
+                if (file is null)
                     return map;
-
-                string json = ReadText(path);
+                using var gzip = new GZipStream(file, CompressionMode.Decompress);
+                using var reader = new StreamReader(gzip, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                string json = reader.ReadToEnd();
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.ValueKind != JsonValueKind.Array)
                     return map;
@@ -50,56 +51,12 @@ namespace CS2TradeMonitor.Application.Market
                     map[marketHashName] = name;
                 }
             }
-            catch (Exception ex)
+            catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                DiagnosticsLogger.Info("SteamDTItem", "加载本地饰品名称映射异常: " + ex.Message);
+                // Missing local display-name data must not change inventory eligibility.
             }
 
             return map;
-        }
-
-        private static string? FindLocalItemsFilePath()
-        {
-            foreach (string root in EnumerateCandidateRoots())
-            {
-                foreach (string relative in new[] { @"resources\steamdt_items.json.gz", "steamdt_items.json.gz", @"resources\steamdt_items.json" })
-                {
-                    string path = Path.Combine(root, relative);
-                    if (File.Exists(path))
-                        return path;
-                }
-            }
-
-            return null;
-        }
-
-        private static IEnumerable<string> EnumerateCandidateRoots()
-        {
-            var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (string root in new[] { global::CS2TradeMonitor.src.SystemServices.InstallationPaths.InstallDirectory, Environment.CurrentDirectory })
-            {
-                string? current = root;
-                for (int i = 0; i < 8 && !string.IsNullOrWhiteSpace(current); i++)
-                {
-                    if (yielded.Add(current))
-                        yield return current;
-
-                    current = Directory.GetParent(current)?.FullName;
-                }
-            }
-        }
-
-        private static string ReadText(string path)
-        {
-            if (path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
-            {
-                using var file = File.OpenRead(path);
-                using var gzip = new GZipStream(file, CompressionMode.Decompress);
-                using var reader = new StreamReader(gzip, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-                return reader.ReadToEnd();
-            }
-
-            return File.ReadAllText(path, Encoding.UTF8);
         }
 
         private static string GetString(JsonElement element, params string[] names)

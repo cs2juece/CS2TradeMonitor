@@ -1,4 +1,3 @@
-using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Steam;
 using CS2TradeMonitor.Domain.Steam;
@@ -11,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CS2TradeMonitor.Application.Steam.Auth;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.Application.Steam
 {
@@ -25,12 +25,7 @@ namespace CS2TradeMonitor.Application.Steam
 
         public long TimeOffset { get; set; } = 0;
 
-        public SteamConfirmationClient(HttpClient? http = null)
-            : this(SteamServiceRuntimeServices.ResolveRoutedHttpFactory(), http)
-        {
-        }
-
-        internal SteamConfirmationClient(ISteamRoutedHttpClientFactory httpFactory, HttpClient? http = null)
+        public SteamConfirmationClient(ISteamRoutedHttpClientFactory httpFactory, HttpClient? http = null)
         {
             _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _http = http;
@@ -70,7 +65,7 @@ namespace CS2TradeMonitor.Application.Steam
                         {
                             long localTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                             TimeOffset = serverTime - localTime;
-                            SteamOfferAuditLog.InfoThrottled(
+                            SteamOfferPlatform.Host.InfoThrottled(
                                 "steam-time-sync-success",
                                 $"Synced Steam time offset. ServerTime={serverTime}, LocalTime={localTime}, Offset={TimeOffset}s",
                                 TimeSpan.FromMinutes(10));
@@ -81,7 +76,7 @@ namespace CS2TradeMonitor.Application.Steam
             catch (Exception ex)
             {
                 _timeSyncAttempted = true;
-                SteamOfferAuditLog.Error("Failed to sync Steam time offset", ex);
+                SteamOfferPlatform.Host.Error("Failed to sync Steam time offset", ex);
             }
         }
 
@@ -345,37 +340,10 @@ namespace CS2TradeMonitor.Application.Steam
 
         private static string BuildBodySummary(string body)
         {
-            string clean = SteamOfferAuditLog.RedactSecrets(body ?? "");
+            string clean = SteamOfferPlatform.Host.RedactSecrets(body ?? "");
             clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
             return clean.Length <= 180 ? clean : clean[..180] + "...";
         }
     }
 
-    public sealed class SteamConfirmationRequest
-    {
-        public string TradeOfferId { get; set; } = "";
-        public string ConfirmationId { get; set; } = "";
-        public string ConfirmationKey { get; set; } = "";
-    }
-
-    public sealed class SteamConfirmationBatchResult
-    {
-        public bool Ok { get; set; }
-        public int AcceptedCount { get; set; }
-        public string Message { get; set; } = "";
-
-        public static SteamConfirmationBatchResult Success(int acceptedCount) => new()
-        {
-            Ok = true,
-            AcceptedCount = acceptedCount,
-            Message = $"Steam 已批量确认 {acceptedCount} 条。"
-        };
-
-        public static SteamConfirmationBatchResult Failed(string message) => new()
-        {
-            Ok = false,
-            AcceptedCount = 0,
-            Message = message
-        };
-    }
 }

@@ -70,6 +70,7 @@ namespace CS2TradeMonitor.Application.Market
         public static CsqaqService Instance => _instance ??= new CsqaqService();
 
         private readonly HttpClient _http;
+        private readonly CsqaqRequestRateLimiter _requestRateLimiter;
         private readonly JsonSerializerOptions _jsonOptions;
         private readonly SemaphoreSlim _fetchLock = new(1, 1);
         private DateTime _lastAttempt = DateTime.MinValue;
@@ -97,13 +98,26 @@ namespace CS2TradeMonitor.Application.Market
         }
 
         private CsqaqService()
-            : this(MarketServiceRuntimeServices.Resolve().DomesticHttpFactory)
+            : this(MarketServiceRuntimeServices.Resolve())
+        {
+        }
+
+        private CsqaqService(MarketServiceRuntimeServices runtimeServices)
+            : this(runtimeServices.DomesticHttpFactory, runtimeServices.CsqaqRateLimiter)
         {
         }
 
         internal CsqaqService(IDomesticHttpClientFactory httpFactory)
+            : this(httpFactory, new CsqaqRequestRateLimiter(TimeSpan.Zero, Task.Delay))
+        {
+        }
+
+        internal CsqaqService(
+            IDomesticHttpClientFactory httpFactory,
+            CsqaqRequestRateLimiter requestRateLimiter)
         {
             if (httpFactory == null) throw new ArgumentNullException(nameof(httpFactory));
+            _requestRateLimiter = requestRateLimiter ?? throw new ArgumentNullException(nameof(requestRateLimiter));
 
             _http = httpFactory.Create(15, new Uri(BaseUrl));
             _http.DefaultRequestHeaders.Add("User-Agent", "CS2TradeMonitor/1.0 (Windows; .NET)");
@@ -161,29 +175,28 @@ namespace CS2TradeMonitor.Application.Market
         public async Task<bool> TestAndUpdateAsync(string apiToken, int refreshSec)
         {
             _apiToken = apiToken ?? "";
-            _lastAttempt = DateTime.MinValue;
-            await FetchAsync(force: true);
-            var latest = Volatile.Read(ref _latest);
-            return latest != null && !latest.IsStale;
+            return await FetchCoreAsync(force: true);
         }
 
-        public async Task FetchAsync(bool force = false)
+        public Task FetchAsync(bool force = false) => FetchCoreAsync(force);
+
+        private async Task<bool> FetchCoreAsync(bool force)
         {
             var now = DateTime.Now;
             if (now < _cooldownUntil)
             {
                 RecordFailure($"QAQ 数据源限流，使用缓存。原因：{_cooldownReason}；下一步：{_cooldownUntil:MM-dd HH:mm:ss} 后自动重试。", log: false, countFailure: false);
-                return;
+                return false;
             }
 
             var interval = GetConfiguredRefreshInterval();
             if (!force && _lastAttempt != DateTime.MinValue && now - _lastAttempt < interval)
             {
                 // 命中刷新间隔是正常节流，继续使用上次成功数据，不应标成过期/警告。
-                return;
+                return false;
             }
 
-            if (!await _fetchLock.WaitAsync(0)) return;
+            if (!await _fetchLock.WaitAsync(0)) return false;
 
             try
             {
@@ -193,13 +206,16 @@ namespace CS2TradeMonitor.Application.Market
                 {
                     request.Headers.Add("ApiToken", _apiToken);
                 }
-                var response = await _http.SendAsync(request);
+                await _requestRateLimiter.WaitAsync().ConfigureAwait(false);
+                using var response = await _http.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
-                    string message = $"QAQ 请求失败：HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
+                    string message = (int)response.StatusCode >= 500
+                        ? $"QAQ 服务暂时不可用（HTTP {(int)response.StatusCode}），将按刷新间隔自动重试。"
+                        : $"QAQ 请求失败：HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
                     ApplyCooldown(message);
                     RecordFailure(message);
-                    return;
+                    return false;
                 }
 
                 var body = await response.Content.ReadAsStringAsync();
@@ -210,7 +226,7 @@ namespace CS2TradeMonitor.Application.Market
                 if (parsed?.Code != 200 || index == null)
                 {
                     RecordFailure("QAQ 返回数据为空或格式异常");
-                    return;
+                    return false;
                 }
 
                 Volatile.Write(ref _latest, new CsqaqData
@@ -229,10 +245,12 @@ namespace CS2TradeMonitor.Application.Market
                 _cooldownUntil = DateTime.MinValue;
                 _cooldownReason = "";
                 NotifyDataUpdated();
+                return true;
             }
             catch (Exception ex)
             {
                 RecordFailure("QAQ 网络访问失败", ex);
+                return false;
             }
             finally
             {

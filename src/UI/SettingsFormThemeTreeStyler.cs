@@ -61,6 +61,12 @@ namespace CS2TradeMonitor.src.UI
                 root.ForeColor = UIColors.TextMain;
             }
 
+            if (root is LiteTextBox textInput)
+            {
+                textInput.RefreshTheme();
+                return;
+            }
+
             if (root is LiteComboBox liteCombo)
             {
                 liteCombo.RefreshTheme();

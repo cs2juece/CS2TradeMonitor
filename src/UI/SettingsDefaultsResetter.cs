@@ -27,6 +27,8 @@ namespace CS2TradeMonitor.src.UI
                 "MainPanel" => "悬浮窗",
                 "Data" => "大盘数据源",
                 "ItemMonitor" => "单品监控",
+                "LocalInventoryMonitor" => "库存监控",
+                "YouPinPurchaseMonitor" => "求购监控",
                 "YouPin" => "悠悠有品",
                 "YouPinStopProfitLoss" => "库存止损/盈",
                 "YouPinProfitLoss" => "吃米/亏米统计",
@@ -56,6 +58,9 @@ namespace CS2TradeMonitor.src.UI
                     return true;
                 case "YouPin":
                     ResetYouPinSaleReminderDefaults(draft, defaults);
+                    return true;
+                case "LocalInventoryMonitor":
+                    ResetLocalInventoryMonitorDefaults(draft, defaults);
                     return true;
                 case "SteamOffers":
                     ResetSteamOfferDefaults(draft, defaults);
@@ -210,6 +215,15 @@ namespace CS2TradeMonitor.src.UI
             draft.DefaultItemPriceAlertWindowMinutes = defaults.DefaultItemPriceAlertWindowMinutes;
             draft.DefaultItemPriceAlertCooldownMinutes = defaults.DefaultItemPriceAlertCooldownMinutes;
             draft.ItemConfigs = defaults.ItemConfigs != null ? new List<ItemMonitorConfig>(defaults.ItemConfigs) : new List<ItemMonitorConfig>();
+        }
+
+        private static void ResetLocalInventoryMonitorDefaults(Settings draft, Settings defaults)
+        {
+            draft.LocalInventoryMonitorEnabled = defaults.LocalInventoryMonitorEnabled;
+            draft.LocalInventoryRefreshMinutes = defaults.LocalInventoryRefreshMinutes;
+            draft.LocalInventoryMinimumChangeCount = defaults.LocalInventoryMinimumChangeCount;
+            draft.LocalInventoryPhoneAlertEnabled = defaults.LocalInventoryPhoneAlertEnabled;
+            draft.LocalInventoryWatchList = defaults.LocalInventoryWatchList;
         }
 
         private static void ResetItemMonitorAppearanceDefaults(Settings draft, Settings defaults)

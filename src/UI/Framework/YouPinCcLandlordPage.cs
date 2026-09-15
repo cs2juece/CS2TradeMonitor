@@ -90,9 +90,12 @@ namespace CS2TradeMonitor.src.UI.Framework
         {
         }
 
-        internal YouPinCcLandlordPage(YouPinLandlordPagePresenter presenter)
+        private readonly Func<Settings> _liveSettings;
+
+        internal YouPinCcLandlordPage(YouPinLandlordPagePresenter presenter, Func<Settings>? liveSettings = null)
         {
             _presenter = presenter ?? throw new ArgumentNullException(nameof(presenter));
+            _liveSettings = liveSettings ?? (() => Settings.Load());
 
             (_repriceTab, _inventoryTab) = CreatePageTabs();
             (_settingsCard,
@@ -216,8 +219,10 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         public override void SetSettingsContext(Settings config, MainForm mainForm, UIController ui)
         {
-            base.SetSettingsContext(config, mainForm, ui);
-            _presenter.Configure(config);
+            // Automation changes apply immediately and must survive the main window's final save.
+            Settings live = _liveSettings();
+            base.SetSettingsContext(live, mainForm, ui);
+            _presenter.Configure(live);
             RenderPolicy();
             RenderPageState(_presenter.GetPageState(GetCurrentScope()));
             RenderInventoryPolicy();
@@ -1724,9 +1729,9 @@ namespace CS2TradeMonitor.src.UI.Framework
                 if (e.KeyCode != Keys.Enter)
                     return;
                 e.SuppressKeyPress = true;
-                CommitText();
+                TryCommitText();
             };
-            Inner.Leave += (_, __) => CommitText();
+            Inner.Leave += (_, __) => TryCommitText();
         }
 
         public event EventHandler? ValueChanged;
@@ -1747,7 +1752,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             }
         }
 
-        private void CommitText()
+        internal bool TryCommitText()
         {
             if (!TryParseDecimal(Inner.Text, out decimal candidate)
                 || candidate < Minimum
@@ -1756,16 +1761,17 @@ namespace CS2TradeMonitor.src.UI.Framework
             {
                 Inner.Text = FormatValue(_value);
                 ValidationFailed?.Invoke(_validationMessage);
-                return;
+                return false;
             }
 
             candidate = decimal.Round(candidate, _decimalPlaces);
             Inner.Text = FormatValue(candidate);
             if (candidate == _value)
-                return;
+                return true;
 
             _value = candidate;
             ValueChanged?.Invoke(this, EventArgs.Empty);
+            return true;
         }
 
         private string FormatValue(decimal value)

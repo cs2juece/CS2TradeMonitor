@@ -1,6 +1,6 @@
 using CS2TradeMonitor.Application.Steam.Auth;
 using CS2TradeMonitor.Domain.Steam;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -136,19 +136,19 @@ namespace CS2TradeMonitor.Application.Steam
             {
                 if (transient.StatusCode == 429 || transient.Code.Contains("rate", StringComparison.OrdinalIgnoreCase))
                     return "被 Steam 限流，请稍后再刷新。";
-                return SteamOfferAuditLog.RedactSecrets(transient.Message);
+                return SteamOfferPlatform.Host.RedactSecrets(transient.Message);
             }
 
             if (ex is TaskCanceledException)
                 return "连接 Steam 超时，请检查网络/代理后重试。";
 
             if (ex is HttpRequestException httpEx)
-                return NetworkDiagnostics.BuildFailureMessage("Steam", step, httpEx);
+                return SteamOfferPlatform.Host.BuildNetworkFailureMessage("Steam", step, httpEx);
 
             if (ex is JsonException)
                 return "Steam 返回内容暂时无法解析，已保留登录状态。";
 
-            return SteamOfferAuditLog.RedactSecrets(ex.Message);
+            return SteamOfferPlatform.Host.RedactSecrets(ex.Message);
         }
     }
 }

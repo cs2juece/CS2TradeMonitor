@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using CS2TradeMonitor.Application.Steam;
 using CS2TradeMonitor.Domain.Steam;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.Application.Steam.Auth.Import
 {
@@ -179,7 +180,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth.Import
             }
             catch (Exception ex)
             {
-                return SteamOfferImportFileResult.Failed("已定位 maFile，但读取失败：" + SteamOfferAuditLog.RedactSecrets(ex.Message), path);
+                return SteamOfferImportFileResult.Failed("已定位 maFile，但读取失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message), path);
             }
         }
 

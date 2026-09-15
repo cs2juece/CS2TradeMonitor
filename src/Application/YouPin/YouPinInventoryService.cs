@@ -1,8 +1,8 @@
-using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.Application.Abstractions;
-using CS2TradeMonitor.Application.Monitoring;
 using CS2TradeMonitor.Domain.YouPin;
+using CS2TradeMonitor.Shared.Ports;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -32,24 +32,27 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private static readonly object InstanceLock = new();
         private static YouPinInventoryService? _instance;
+        private static Func<YouPinInventoryServiceDependencies>? _platformFactory;
         public static YouPinInventoryService Instance
         {
             get
             {
                 lock (InstanceLock)
                 {
-                    return _instance ??= new YouPinInventoryService();
+                    return _instance ??= new YouPinInventoryService(ResolvePlatformDependencies());
                 }
             }
         }
 
         private readonly IYouPinAuthService _authService;
         private readonly HttpClient _http;
+        private readonly CS2TradeMonitor.Shared.Ports.IClock _clock;
+        private readonly IYouPinInventoryPlatformHost _platformHost;
         private readonly SemaphoreSlim _fetchLock = new(1, 1);
         private readonly object _stateLock = new();
         private readonly object _timerLock = new();
         private readonly Dictionary<string, TimeSpan> _backgroundRefreshConsumers = new(StringComparer.Ordinal);
-        private readonly string _historyPath = RuntimeDataPaths.GetDataFilePath("youpin_inventory_history.json");
+        private readonly string _historyPath;
         private System.Threading.Timer? _timer;
         private Settings _settings = new();
         private YouPinInventoryHistory _history = new();
@@ -61,22 +64,33 @@ namespace CS2TradeMonitor.Application.YouPin
 
         public event Action? DataUpdated;
 
-        private YouPinInventoryService()
-            : this(YouPinServiceRuntimeServices.Resolve())
+        private YouPinInventoryService(YouPinInventoryServiceDependencies dependencies)
         {
-        }
-
-        internal YouPinInventoryService(YouPinServiceRuntimeServices services)
-            : this(services.Auth, services.DomesticHttpFactory)
-        {
-        }
-
-        internal YouPinInventoryService(IYouPinAuthService authService, IDomesticHttpClientFactory httpFactory)
-        {
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-            _http = (httpFactory ?? throw new ArgumentNullException(nameof(httpFactory))).Create(20);
+            ArgumentNullException.ThrowIfNull(dependencies);
+            _authService = dependencies.AuthService ?? throw new ArgumentNullException(nameof(dependencies.AuthService));
+            _http = (dependencies.HttpFactory ?? throw new ArgumentNullException(nameof(dependencies.HttpFactory))).Create(20);
+            _clock = dependencies.Clock ?? throw new ArgumentNullException(nameof(dependencies.Clock));
+            _platformHost = dependencies.PlatformHost ?? throw new ArgumentNullException(nameof(dependencies.PlatformHost));
+            _historyPath = _platformHost.InventoryHistoryPath;
             _history = YouPinInventoryHistoryStore.Load(_historyPath, JsonOptions);
         }
+
+        public static void ConfigurePlatform(Func<YouPinInventoryServiceDependencies> platformFactory)
+        {
+            ArgumentNullException.ThrowIfNull(platformFactory);
+            lock (InstanceLock)
+            {
+                if (_instance == null)
+                    _platformFactory = platformFactory;
+            }
+        }
+
+        public static YouPinInventoryService Create(YouPinInventoryServiceDependencies dependencies)
+            => new(dependencies);
+
+        private static YouPinInventoryServiceDependencies ResolvePlatformDependencies()
+            => _platformFactory?.Invoke()
+                ?? throw new InvalidOperationException("悠悠库存服务的平台依赖尚未配置。");
 
         public void Configure(Settings settings)
         {
@@ -141,6 +155,8 @@ namespace CS2TradeMonitor.Application.YouPin
         {
             _timer?.Dispose();
             _timer = null;
+            if (!_platformHost.UsesInternalTimer)
+                return;
             if (!ShouldRunTimerLocked())
                 return;
 
@@ -275,6 +291,9 @@ namespace CS2TradeMonitor.Application.YouPin
             await FetchCoreAsync(force: false, useMock: false, CancellationToken.None);
         }
 
+        public Task<YouPinInventoryFetchResult> FetchIfDueAsync(CancellationToken cancellationToken = default)
+            => FetchCoreAsync(force: false, useMock: false, cancellationToken);
+
         private async Task<YouPinInventoryFetchResult> FetchCoreAsync(bool force, bool useMock, CancellationToken cancellationToken)
         {
             if (!await _fetchLock.WaitAsync(0, cancellationToken))
@@ -300,7 +319,7 @@ namespace CS2TradeMonitor.Application.YouPin
                     return YouPinInventoryFetchResult.Skip("未启用");
                 }
 
-                if (!force && !useMock && DateTime.Now - _lastFetch < TimeSpan.FromSeconds(refreshSec))
+                if (!force && !useMock && _clock.UtcNow.LocalDateTime - _lastFetch < TimeSpan.FromSeconds(refreshSec))
                     return YouPinInventoryFetchResult.Skip("未到抓取时间");
 
                 List<YouPinInventoryItem> items;
@@ -325,7 +344,12 @@ namespace CS2TradeMonitor.Application.YouPin
                     source = "悠悠有品";
                 }
 
-                var snapshot = RecordSnapshot(items, source, totalValueOverride, remoteTrendState);
+                var snapshot = await RecordSnapshotAsync(
+                    items,
+                    source,
+                    totalValueOverride,
+                    remoteTrendState,
+                    cancellationToken);
                 _lastFetch = snapshot.Time;
                 _lastStatus = remoteTrendState != null && remoteTrendState.Rows.Count > 0
                     ? $"悠悠有品涨跌读取成功：{snapshot.TotalCount} 件，市场价 ¥{snapshot.TotalValue:F2}"
@@ -451,7 +475,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 hasNext = GetBool(data, "hasNext", "HasNext") && currentCount > 0;
                 pageIndex++;
                 if (hasNext)
-                    await Task.Delay(150, cancellationToken);
+                    await _clock.DelayAsync(TimeSpan.FromMilliseconds(150), cancellationToken);
             }
 
             var trendState = await TryFetchRemoteTrendStateAsync(token.Trim(), device, uk, cancellationToken);
@@ -538,7 +562,7 @@ namespace CS2TradeMonitor.Application.YouPin
 
                     pageIndex++;
                     if (pageIndex <= totalPages)
-                        await Task.Delay(150, cancellationToken);
+                        await _clock.DelayAsync(TimeSpan.FromMilliseconds(150), cancellationToken);
                 }
 
                 if (state.Rows.Count == 0 && state.TotalValue <= 0)
@@ -560,13 +584,14 @@ namespace CS2TradeMonitor.Application.YouPin
             }
         }
 
-        private YouPinInventorySnapshot RecordSnapshot(
+        private async Task<YouPinInventorySnapshot> RecordSnapshotAsync(
             List<YouPinInventoryItem> items,
             string source,
             double totalValueOverride = 0,
-            YouPinInventoryTrendState? trendState = null)
+            YouPinInventoryTrendState? trendState = null,
+            CancellationToken cancellationToken = default)
         {
-            var now = DateTime.Now;
+            var now = _clock.UtcNow.LocalDateTime;
             bool useTrendSnapshot = trendState != null && trendState.Rows.Count > 0;
             var sourceItems = useTrendSnapshot ? BuildItemsFromTrendRows(trendState!) : items;
             var normalized = sourceItems
@@ -636,9 +661,12 @@ namespace CS2TradeMonitor.Application.YouPin
             }
 
             if (alertToNotify != null)
-                NotifyValueAlert(alertToNotify);
+                await _platformHost.PublishValueAlertAsync(_settings, alertToNotify, cancellationToken);
             if (stopAlertsToNotify.Count > 0)
-                NotifyStopProfitLossAlerts(stopAlertsToNotify);
+                await _platformHost.PublishStopProfitLossAlertsAsync(
+                    _settings,
+                    stopAlertsToNotify,
+                    cancellationToken);
 
             return snapshot;
         }
@@ -678,55 +706,6 @@ namespace CS2TradeMonitor.Application.YouPin
                 Source = source,
                 Message = $"库存估值{(rising ? "上涨" : "下跌")} {FormatSigned(current.TotalDelta)} ({FormatSignedPercent(current.TotalDeltaPercent)})"
             };
-        }
-
-        private void NotifyValueAlert(YouPinInventoryValueAlert alert)
-        {
-            if (_settings.DoNotDisturbEnabled) return;
-
-            string title = "悠悠有品库存涨跌提醒";
-            string message = $"{alert.Message}\n¥{alert.OldValue:F2} -> ¥{alert.NewValue:F2}";
-            var mode = _settings.YouPinInventoryChangeAlertNotificationMode;
-            bool showBubble = mode == YouPinSaleReminderNotificationMode.Bubble || mode == YouPinSaleReminderNotificationMode.BubbleAndSound;
-            bool playSound = mode == YouPinSaleReminderNotificationMode.Sound || mode == YouPinSaleReminderNotificationMode.BubbleAndSound;
-            if (!showBubble && !playSound)
-                return;
-
-            AppNotificationHub.Instance.Request(
-                title,
-                message,
-                AppNotificationSeverity.Info,
-                AppNotificationPlacement.BottomLeft,
-                playSound,
-                showToast: showBubble,
-                source: AlertHistorySources.Inventory);
-        }
-
-        private void NotifyStopProfitLossAlerts(List<YouPinStopProfitLossAlert> alerts)
-        {
-            if (_settings.DoNotDisturbEnabled) return;
-            if (alerts.Count == 0) return;
-
-            string title = alerts.Count == 1 ? "库存止盈/损报警" : $"库存止盈/损报警（{alerts.Count} 条）";
-            var preview = alerts.Take(3).Select(x => x.Message);
-            string message = string.Join(Environment.NewLine, preview);
-            if (alerts.Count > 3)
-                message += Environment.NewLine + $"另有 {alerts.Count - 3} 条达到阈值。";
-
-            var mode = _settings.YouPinStopProfitLossNotificationMode;
-            bool showBubble = mode == YouPinSaleReminderNotificationMode.Bubble || mode == YouPinSaleReminderNotificationMode.BubbleAndSound;
-            bool playSound = mode == YouPinSaleReminderNotificationMode.Sound || mode == YouPinSaleReminderNotificationMode.BubbleAndSound;
-            if (!showBubble && !playSound)
-                return;
-
-            AppNotificationHub.Instance.Request(
-                title,
-                message,
-                AppNotificationSeverity.Warning,
-                AppNotificationPlacement.BottomLeft,
-                playSound,
-                showToast: showBubble,
-                source: AlertHistorySources.InventoryStopProfitLoss);
         }
 
         private void UpdateDaily(YouPinInventorySnapshot snapshot, YouPinInventoryTrendState? trendState = null)

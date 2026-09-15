@@ -205,6 +205,8 @@ namespace CS2TradeMonitor.src.UI.Controls
             inner.Controls.Add(_layout);
             inner.Controls.Add(_header);
             this.Controls.Add(inner);
+            LiteCorners.Clip(this);
+            LiteCorners.Clip(inner, LiteCorners.Radius - 1);
         }
 
         public void AddHeaderAction(Control action)
@@ -586,7 +588,7 @@ namespace CS2TradeMonitor.src.UI.Controls
 
     public class LiteCard : Panel
     {
-        public LiteCard() { BackColor = UIColors.CardBg; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; Dock = DockStyle.Top; Padding = new Padding(1); }
+        public LiteCard() { LiteCorners.Clip(this); BackColor = UIColors.CardBg; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; Dock = DockStyle.Top; Padding = new Padding(1); }
         protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); using (var p = new Pen(UIColors.Border)) e.Graphics.DrawRectangle(p, 0, 0, Width - 1, Height - 1); }
     }
 

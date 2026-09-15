@@ -153,11 +153,26 @@ namespace CS2TradeMonitor
                 // 启动时发布首个配置快照，后续热路径读取 AppConfigState。
                 Settings startupSettings = Settings.Load();
                 if (startupSettings.AutoStart)
-                    AutoStart.RepairIfNeeded(enabled: true, showErrorMessage: false);
+                {
+                    bool repaired = AutoStart.RepairIfNeeded(enabled: true, showErrorMessage: true);
+                    if (!repaired)
+                    {
+                        startupSettings.AutoStart = AutoStart.IsEnabledForCurrentExe();
+                        SettingsSaveResult saveResult = startupSettings.Save();
+                        if (!saveResult.Succeeded)
+                        {
+                            DiagnosticsLogger.Error(
+                                "AutoStart",
+                                $"Persisting startup auto-start reconciliation failed. Type={saveResult.FailureType}; Stage={saveResult.FailureStage}");
+                        }
+                    }
+                }
                 runtimeServices.AppConfigState.PublishFrom(startupSettings, "StartupSettingsLoaded");
 
                 var moduleStopwatch = Stopwatch.StartNew();
                 runtimeServices.ModuleHost.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+                runtimeServices.LocalInventoryMonitor.Start(startupSettings);
+                runtimeServices.YouPinPurchaseMonitoring.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
                 moduleStopwatch.Stop();
                 if (UiJankProfiler.Enabled)
                 {
@@ -211,6 +226,8 @@ namespace CS2TradeMonitor
                         runtimeServices.SteamConnectivity.StopAsync().GetAwaiter().GetResult();
                         runtimeServices.SteamSessionKeepAlive.Stop();
                         runtimeServices.SteamOffers.StopAutoConfirm();
+                        runtimeServices.YouPinPurchaseMonitoring.StopAsync().GetAwaiter().GetResult();
+                        runtimeServices.LocalInventoryMonitor.StopAsync().GetAwaiter().GetResult();
                         runtimeServices.ModuleHost.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
                     }
                 }

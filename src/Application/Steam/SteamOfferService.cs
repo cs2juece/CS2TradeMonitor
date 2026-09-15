@@ -1,12 +1,9 @@
-using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.Application;
 using CS2TradeMonitor.Application.Abstractions;
-using CS2TradeMonitor.Application.Notify;
 using CS2TradeMonitor.Application.Steam;
 using CS2TradeMonitor.Application.YouPin;
 using CS2TradeMonitor.Domain.Steam;
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.Core;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -20,14 +17,27 @@ using System.Threading;
 using System.Threading.Tasks;
 using CS2TradeMonitor.Application.Steam.Auth;
 using CS2TradeMonitor.Application.Steam.Auth.Import;
+using CS2TradeMonitor.Shared.Trading;
 using static CS2TradeMonitor.Application.Steam.SteamOfferLoginRecoveryHelper;
 using static CS2TradeMonitor.Application.Steam.SteamOfferMappingHelper;
 using static CS2TradeMonitor.Application.Steam.SteamOfferYouPinVerificationHelper;
 
 namespace CS2TradeMonitor.Application.Steam
 {
+    public sealed record SteamOfferServiceDependencies(
+        ISteamConfirmationClient ConfirmationClient,
+        ISteamTradeOfferClient TradeOfferClient,
+        ISteamAuthStore AuthStore,
+        ISteamTokenVault TokenVault,
+        ISteamLoginService LoginService,
+        IYouPinSaleReminderService YouPinSaleReminders,
+        ISteamOfferPlatformHost PlatformHost);
+
     public sealed partial class SteamOfferService : ISteamOfferService, IManualYouPinOfferAutoConfirmation
     {
+        private static readonly object InstanceGate = new();
+        private static Func<SteamOfferServiceDependencies>? _platformFactory;
+        private static SteamOfferService? _instance;
         private readonly ISteamConfirmationClient _confirmationClient;
         private readonly ISteamTradeOfferClient _tradeOfferClient;
         private readonly ISteamAuthStore _authStore;
@@ -55,20 +65,47 @@ namespace CS2TradeMonitor.Application.Steam
             return _autoConfirmationService.HandleManuallySentYouPinOfferAsync(order, sendResult, cancellationToken);
         }
 
-        private SteamOfferService()
-            : this(SteamServiceRuntimeServices.Resolve())
+        private readonly ISteamOfferPlatformHost _host;
+
+        public static SteamOfferService Instance
         {
+            get
+            {
+                lock (InstanceGate)
+                {
+                    if (_instance is not null)
+                        return _instance;
+                    if (_platformFactory is null)
+                        throw new InvalidOperationException("Steam 报价平台宿主尚未配置。");
+
+                    _instance = Create(_platformFactory());
+                    return _instance;
+                }
+            }
         }
 
-        internal SteamOfferService(SteamServiceRuntimeServices services)
-            : this(
+        public static void ConfigurePlatform(Func<SteamOfferServiceDependencies> factory)
+        {
+            ArgumentNullException.ThrowIfNull(factory);
+            lock (InstanceGate)
+            {
+                if (_instance is null)
+                    _platformFactory = factory;
+            }
+        }
+
+        public static SteamOfferService Create(SteamOfferServiceDependencies services)
+        {
+            ArgumentNullException.ThrowIfNull(services);
+            SteamOfferPlatform.Configure(services.PlatformHost);
+            return new SteamOfferService(
                 services.ConfirmationClient,
                 services.TradeOfferClient,
                 services.AuthStore,
                 services.TokenVault,
                 services.LoginService,
-                services.YouPinSaleReminders)
-        {
+                services.YouPinSaleReminders,
+                services.PlatformHost);
         }
 
         internal SteamOfferService(
@@ -78,6 +115,25 @@ namespace CS2TradeMonitor.Application.Steam
             ISteamTokenVault tokenVault,
             ISteamLoginService loginService,
             IYouPinSaleReminderService youPinSaleReminders)
+            : this(
+                confirmationClient,
+                tradeOfferClient,
+                authStore,
+                tokenVault,
+                loginService,
+                youPinSaleReminders,
+                SteamOfferPlatform.Host)
+        {
+        }
+
+        private SteamOfferService(
+            ISteamConfirmationClient confirmationClient,
+            ISteamTradeOfferClient tradeOfferClient,
+            ISteamAuthStore authStore,
+            ISteamTokenVault tokenVault,
+            ISteamLoginService loginService,
+            IYouPinSaleReminderService youPinSaleReminders,
+            ISteamOfferPlatformHost host)
         {
             _confirmationClient = confirmationClient ?? throw new ArgumentNullException(nameof(confirmationClient));
             _tradeOfferClient = tradeOfferClient ?? throw new ArgumentNullException(nameof(tradeOfferClient));
@@ -85,8 +141,15 @@ namespace CS2TradeMonitor.Application.Steam
             _tokenVault = tokenVault ?? throw new ArgumentNullException(nameof(tokenVault));
             _loginService = loginService ?? throw new ArgumentNullException(nameof(loginService));
             _youPinSaleReminders = youPinSaleReminders ?? throw new ArgumentNullException(nameof(youPinSaleReminders));
+            _host = host ?? throw new ArgumentNullException(nameof(host));
+            SteamOfferPlatform.Configure(_host);
             _stateStore = new SteamOfferStateStore(PrepareManualOffer);
-            _autoConfirmationService = new AutoConfirmationService(this, _youPinSaleReminders, RaiseDataUpdated);
+            _autoConfirmationService = new AutoConfirmationService(
+                this,
+                _youPinSaleReminders,
+                _host,
+                _host,
+                RaiseDataUpdated);
             ImmediateAutoProcessingAsync = _autoConfirmationService.ProcessLoadedOffersNowAsync;
             _accountRefresh = new SteamOfferAccountRefreshCoordinator(
                 _authStore,
@@ -105,8 +168,6 @@ namespace CS2TradeMonitor.Application.Steam
                 _accountRefresh.QueueSteamApiKeyRefresh);
             _accountRefresh.QueueSteamApiKeyRefresh();
         }
-
-        public static SteamOfferService Instance { get; } = new();
 
         public event Action? DataUpdated;
 
@@ -353,7 +414,7 @@ namespace CS2TradeMonitor.Application.Steam
                     {
                         LogLoadStage("api-failed", apiWatch);
                         partialWarning = BuildSteamOfferListWarning("LoadTradeOffersApi", ex);
-                        SteamOfferAuditLog.InfoThrottled(
+                        _host.InfoThrottled(
                             "steam-tradeoffers-api-partial-failure",
                             "Steam Web API trade offers unavailable, falling back to web session: " + partialWarning,
                             TimeSpan.FromMinutes(5));
@@ -394,9 +455,9 @@ namespace CS2TradeMonitor.Application.Steam
                             }
 
                             partialWarning = AppendPartialWarning(partialWarning, "Steam 网页报价列表登录状态失效，自动重登失败：" + relogin.Message);
-                            SteamOfferAuditLog.InfoThrottled(
+                            _host.InfoThrottled(
                                 "steam-tradeoffers-web-auth-relogin-failed",
-                                "Steam web trade offers auth expired and auto relogin failed, keeping API result. Reason=" + SteamOfferAuditLog.RedactSecrets(relogin.Message),
+                                "Steam web trade offers auth expired and auto relogin failed, keeping API result. Reason=" + _host.RedactSecrets(relogin.Message),
                                 TimeSpan.FromMinutes(5));
                         }
                         else
@@ -405,7 +466,7 @@ namespace CS2TradeMonitor.Application.Steam
                                 throw;
 
                             partialWarning = AppendPartialWarning(partialWarning, "Steam 网页报价列表暂不可用：" + webWarning);
-                            SteamOfferAuditLog.InfoThrottled(
+                            _host.InfoThrottled(
                                 "steam-tradeoffers-web-auth-partial-failure",
                                 "Steam web trade offers unavailable, keeping API result and saved session. Reason=" + webWarning,
                                 TimeSpan.FromMinutes(5));
@@ -420,7 +481,7 @@ namespace CS2TradeMonitor.Application.Steam
                             string.IsNullOrWhiteSpace(credential.ApiKey)
                                 ? "Steam Web API Key 未获取，网页报价列表暂不可用：" + webWarning
                                 : "Steam 网页报价列表暂不可用：" + webWarning);
-                        SteamOfferAuditLog.InfoThrottled(
+                        _host.InfoThrottled(
                             "steam-tradeoffers-web-partial-failure",
                             "Steam web trade offers unavailable, falling back to mobile confirmations: " + webWarning,
                             TimeSpan.FromMinutes(5));
@@ -442,12 +503,12 @@ namespace CS2TradeMonitor.Application.Steam
                     foregroundOfferListFetched,
                     triggerImmediateAutoProcessing);
                 LogLoadStage("foreground-total", loadWatch);
-                SteamOfferAuditLog.LogRefreshResult(true, offers.Count, status);
+                _host.LogRefreshResult(true, offers.Count, status);
                 return SteamOfferActionResult.Success(status);
             }
             catch (SteamAuthExpiredException ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = _host.RedactSecrets(ex.Message);
                 if (allowAutoRelogin && HasRecoverableLoginState(credential))
                 {
                     SetOffers(new List<SteamOfferItem>(), "Steam 登录状态失效，正在自动重新登录…", error);
@@ -476,29 +537,29 @@ namespace CS2TradeMonitor.Application.Steam
             {
                 string error = BuildSteamOfferListWarning("LoadOffers", ex);
                 SetOffers(new List<SteamOfferItem>(), "Steam 登录状态已保存，但当前无法刷新。", error);
-                SteamOfferAuditLog.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
-                SteamOfferAuditLog.DiagnosticError("Load Steam offers temporarily failed", ex);
+                _host.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
+                _host.DiagnosticError("Load Steam offers temporarily failed", ex);
                 return SteamOfferActionResult.Failed("暂时无法刷新 Steam 报价：" + error, ex.Code);
             }
             catch (HttpRequestException ex)
             {
                 string error = BuildSteamOfferListWarning("LoadOffers", ex);
                 SetOffers(new List<SteamOfferItem>(), "Steam 登录状态已保存，但当前无法刷新。", error);
-                SteamOfferAuditLog.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
-                SteamOfferAuditLog.DiagnosticError("Load Steam offers network failed: " + error);
+                _host.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
+                _host.DiagnosticError("Load Steam offers network failed: " + error);
                 return SteamOfferActionResult.Failed("暂时无法刷新 Steam 报价：" + error, SteamLoginFailureCategory.NetworkError.ToString());
             }
             catch (TaskCanceledException ex)
             {
                 string error = BuildSteamOfferListWarning("LoadOffers", ex);
                 SetOffers(new List<SteamOfferItem>(), "Steam 登录状态已保存，但当前无法刷新。", error);
-                SteamOfferAuditLog.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
-                SteamOfferAuditLog.DiagnosticError("Load Steam offers timed out: " + error);
+                _host.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
+                _host.DiagnosticError("Load Steam offers timed out: " + error);
                 return SteamOfferActionResult.Failed("暂时无法刷新 Steam 报价：" + error, SteamLoginFailureCategory.NetworkError.ToString());
             }
             catch (Exception ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = _host.RedactSecrets(ex.Message);
                 if (allowAutoRelogin && HasRecoverableLoginState(credential) && LooksLikeExplicitAuthExpired(error))
                 {
                     SetOffers(new List<SteamOfferItem>(), "Steam 登录状态失效，正在自动重新登录…", error);
@@ -527,8 +588,8 @@ namespace CS2TradeMonitor.Application.Steam
                 }
 
                 SetOffers(new List<SteamOfferItem>(), "Steam 登录状态已保存，但当前无法刷新。", error);
-                SteamOfferAuditLog.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
-                SteamOfferAuditLog.DiagnosticError("Load Steam confirmations failed", ex);
+                _host.LogRefreshResult(false, 0, "暂时无法刷新 Steam 报价：" + error);
+                _host.DiagnosticError("Load Steam confirmations failed", ex);
                 return SteamOfferActionResult.Failed("暂时无法刷新 Steam 报价：" + error);
             }
         }
@@ -859,27 +920,27 @@ namespace CS2TradeMonitor.Application.Steam
                             () => _confirmationClient.SendConfirmationAjaxAsync(credential, confirmation.ConfirmationId, confirmation.ConfirmationKey, "allow"));
                         if (!confirmed)
                             return SteamOfferActionResult.Failed("Steam 返回确认失败，请稍后重试或打开 Steam 页面手动处理。");
-                        SteamOfferAuditLog.LogMobileConfirmation(tradeOfferId, offer.PlatformOrderNo, SteamOfferAuditLog.TriggerUserManual, "用户手动完成Steam手机确认。");
+                        _host.LogMobileConfirmation(tradeOfferId, offer.PlatformOrderNo, _host.TriggerUserManual, "用户手动完成Steam手机确认。");
                     }
                     else if (!accept.Ok)
                     {
-                        return SteamOfferActionResult.Failed("同意 Steam 报价失败：" + SteamOfferAuditLog.RedactSecrets(accept.Message));
+                        return SteamOfferActionResult.Failed("同意 Steam 报价失败：" + _host.RedactSecrets(accept.Message));
                     }
                 }
 
                 MarkOfferStatus(tradeOfferId, SteamOfferStatus.Accepted);
                 if (directMobileConfirmation)
-                    SteamOfferAuditLog.LogMobileConfirmation(tradeOfferId, offer.PlatformOrderNo, SteamOfferAuditLog.TriggerUserManual, "用户手动完成Steam手机确认。");
+                    _host.LogMobileConfirmation(tradeOfferId, offer.PlatformOrderNo, _host.TriggerUserManual, "用户手动完成Steam手机确认。");
                 else
-                    SteamOfferAuditLog.LogAcceptOffer(tradeOfferId, offer.CanAcceptSafely, offer.VerifiedByYouPin, offer.PlatformOrderNo);
+                    _host.LogAcceptOffer(tradeOfferId, offer.CanAcceptSafely, offer.VerifiedByYouPin, offer.PlatformOrderNo);
                 return SteamOfferActionResult.Success($"已同意 Steam 报价：{tradeOfferId}");
             }
             catch (Exception ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = _host.RedactSecrets(ex.Message);
                 if (LooksLikeExplicitAuthExpired(error) || ex is SteamAuthExpiredException)
                     NotifySteamLoginExpiredOnce("Steam 登录失效", "Steam 报价后台处理已暂停，请重新登录或用 Token 恢复。");
-                SteamOfferAuditLog.Error($"Accept trade offer failed. TradeOfferId={tradeOfferId}", ex);
+                _host.Error($"Accept trade offer failed. TradeOfferId={tradeOfferId}", ex);
                 return SteamOfferActionResult.Failed("同意 Steam 报价失败：" + error);
             }
         }
@@ -941,23 +1002,23 @@ namespace CS2TradeMonitor.Application.Steam
                     }
                     else if (!accept.Ok)
                     {
-                        return SteamOfferActionResult.Failed("同意 Steam 报价失败：" + SteamOfferAuditLog.RedactSecrets(accept.Message));
+                        return SteamOfferActionResult.Failed("同意 Steam 报价失败：" + _host.RedactSecrets(accept.Message));
                     }
                 }
 
                 MarkOfferStatus(tradeOfferId, SteamOfferStatus.Accepted);
                 if (directMobileConfirmation)
-                    SteamOfferAuditLog.LogMobileConfirmation(tradeOfferId, plan.MatchedOrderNo, SteamOfferAuditLog.TriggerBackgroundAuto, "本软件完成Steam手机确认。");
+                    _host.LogMobileConfirmation(tradeOfferId, plan.MatchedOrderNo, _host.BackgroundTrigger, "本软件完成Steam手机确认。");
                 else
-                    SteamOfferAuditLog.LogAcceptOffer(tradeOfferId, offer.CanAcceptSafely, offer.VerifiedByYouPin, offer.PlatformOrderNo, SteamOfferAuditLog.TriggerBackgroundAuto);
+                    _host.LogAcceptOffer(tradeOfferId, offer.CanAcceptSafely, offer.VerifiedByYouPin, offer.PlatformOrderNo, _host.BackgroundTrigger);
                 return SteamOfferActionResult.Success($"已自动接收 Steam 报价：{tradeOfferId}");
             }
             catch (Exception ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = _host.RedactSecrets(ex.Message);
                 if (LooksLikeExplicitAuthExpired(error) || ex is SteamAuthExpiredException)
                     NotifySteamLoginExpiredOnce("Steam 登录失效", "Steam 报价自动处理需要重新登录。");
-                SteamOfferAuditLog.Error($"Auto accept trade offer failed. TradeOfferId={tradeOfferId}", ex);
+                _host.Error($"Auto accept trade offer failed. TradeOfferId={tradeOfferId}", ex);
                 return SteamOfferActionResult.Failed("自动接收 Steam 报价失败：" + error);
             }
         }
@@ -977,7 +1038,7 @@ namespace CS2TradeMonitor.Application.Steam
                 if (confirmation == null)
                     return SteamOfferActionResult.Failed("未找到相同 Steam 报价号的手机交易确认。", "not_found");
 
-                SteamOfferAuditLog.LogMobileConfirmationSubmissionStarted();
+                _host.LogMobileConfirmationSubmissionStarted();
                 bool success;
                 try
                 {
@@ -985,25 +1046,25 @@ namespace CS2TradeMonitor.Application.Steam
                         credential,
                         "Steam 移动确认",
                         () => _confirmationClient.SendConfirmationAjaxAsync(credential, confirmation.ConfirmationId, confirmation.ConfirmationKey, "allow"));
-                    SteamOfferAuditLog.LogMobileConfirmationSubmissionCompleted(success);
+                    _host.LogMobileConfirmationSubmissionCompleted(success);
                 }
                 catch (Exception ex)
                 {
-                    SteamOfferAuditLog.LogMobileConfirmationSubmissionCompleted(success: false, exception: ex);
+                    _host.LogMobileConfirmationSubmissionCompleted(success: false, exception: ex);
                     throw;
                 }
                 if (!success)
                     return SteamOfferActionResult.Failed("Steam 返回确认失败，请稍后重试或打开 Steam 页面手动处理。");
 
-                SteamOfferAuditLog.LogMobileConfirmation(plan.TradeOfferId, plan.MatchedOrderNo, SteamOfferAuditLog.TriggerBackgroundAuto, "本软件完成Steam手机确认。");
+                _host.LogMobileConfirmation(plan.TradeOfferId, plan.MatchedOrderNo, _host.BackgroundTrigger, "本软件完成Steam手机确认。");
                 return SteamOfferActionResult.Success("已完成匹配的 Steam 手机确认。");
             }
             catch (Exception ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = _host.RedactSecrets(ex.Message);
                 if (LooksLikeExplicitAuthExpired(error) || ex is SteamAuthExpiredException)
                     NotifySteamLoginExpiredOnce("Steam 登录失效", "Steam 手机确认自动处理需要重新登录。");
-                SteamOfferAuditLog.Error($"Matched mobile confirmation failed. TradeOfferId={plan.TradeOfferId}", ex);
+                _host.Error($"Matched mobile confirmation failed. TradeOfferId={plan.TradeOfferId}", ex);
                 return SteamOfferActionResult.Failed("Steam 手机确认失败：" + error);
             }
         }
@@ -1031,7 +1092,7 @@ namespace CS2TradeMonitor.Application.Steam
                 }
                 catch (Exception ex)
                 {
-                    errors.Add(SteamOfferAuditLog.RedactSecrets(ex.Message));
+                    errors.Add(_host.RedactSecrets(ex.Message));
                 }
             }
 
@@ -1045,7 +1106,7 @@ namespace CS2TradeMonitor.Application.Steam
                 }
                 catch (Exception ex)
                 {
-                    errors.Add(SteamOfferAuditLog.RedactSecrets(ex.Message));
+                    errors.Add(_host.RedactSecrets(ex.Message));
                 }
             }
 
@@ -1125,7 +1186,7 @@ namespace CS2TradeMonitor.Application.Steam
                 bool ok = await _tradeOfferClient.AcknowledgeNewTradeAsync(credential, offer.TradeOfferId);
                 if (!ok)
                 {
-                    SteamOfferAuditLog.InfoThrottled(
+                    _host.InfoThrottled(
                         "steam-trade-ack-returned-false",
                         $"Steam new trade acknowledgement returned false. TradeOfferId={offer.TradeOfferId}",
                         TimeSpan.FromMinutes(10));
@@ -1133,9 +1194,9 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                _host.InfoThrottled(
                     "steam-trade-ack-failed",
-                    "Steam new trade acknowledgement skipped: " + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                    "Steam new trade acknowledgement skipped: " + _host.RedactSecrets(ex.Message),
                     TimeSpan.FromMinutes(10));
             }
         }
@@ -1154,7 +1215,7 @@ namespace CS2TradeMonitor.Application.Steam
                 !string.IsNullOrWhiteSpace(plan.TradeOfferId)
                 && !string.IsNullOrWhiteSpace(x.TradeOfferId)
                 && string.Equals(plan.TradeOfferId.Trim(), x.TradeOfferId.Trim(), StringComparison.OrdinalIgnoreCase));
-            SteamOfferAuditLog.LogMobileConfirmationMatchEvaluation(confirmations.Count, sameOfferId, matched != null);
+            _host.LogMobileConfirmationMatchEvaluation(confirmations.Count, sameOfferId, matched != null);
             return matched;
         }
 
@@ -1181,9 +1242,9 @@ namespace CS2TradeMonitor.Application.Steam
                 _ignoredTradeOffers.Add(tradeOfferId);
             }
 
-            SteamOfferAuditLog.InfoThrottled(
+            SteamOfferPlatform.Host.InfoThrottled(
                 "steam-trade-offer-ignored:" + tradeOfferId,
-                "Steam trade offer ignored as already handled or inactive. TradeOfferId=" + tradeOfferId + "; Reason=" + SteamOfferAuditLog.RedactSecrets(reason),
+                "Steam trade offer ignored as already handled or inactive. TradeOfferId=" + tradeOfferId + "; Reason=" + _host.RedactSecrets(reason),
                 TimeSpan.FromMinutes(10));
         }
 
@@ -1214,15 +1275,15 @@ namespace CS2TradeMonitor.Application.Steam
                     return SteamOfferActionResult.Failed("Steam 返回拒绝失败，请稍后重试或打开 Steam 页面手动处理。");
 
                 MarkOfferStatus(tradeOfferId, SteamOfferStatus.Denied);
-                SteamOfferAuditLog.LogDenyOffer(tradeOfferId);
+                _host.LogDenyOffer(tradeOfferId);
                 return SteamOfferActionResult.Success($"已拒绝 Steam 报价：{tradeOfferId}");
             }
             catch (Exception ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = _host.RedactSecrets(ex.Message);
                 if (LooksLikeExplicitAuthExpired(error) || ex is SteamAuthExpiredException)
                     NotifySteamLoginExpiredOnce("Steam 登录失效", "Steam 报价后台处理已暂停，请重新登录或用 Token 恢复。");
-                SteamOfferAuditLog.Error($"Deny trade offer failed. TradeOfferId={tradeOfferId}", ex);
+                _host.Error($"Deny trade offer failed. TradeOfferId={tradeOfferId}", ex);
                 return SteamOfferActionResult.Failed("拒绝 Steam 报价失败：" + error);
             }
         }
@@ -1261,38 +1322,13 @@ namespace CS2TradeMonitor.Application.Steam
             _lastLoginExpiredNotificationUtc = now;
             try
             {
-                // 登录失效通知需要读取勿扰和手机通道配置，属于低频告警路径而非 UI 热刷新路径。
-                var settings = Settings.Load();
-                if (!settings.DoNotDisturbEnabled)
-                {
-                    AppNotificationHub.Instance.Request(
-                        title,
-                        message,
-                        AppNotificationSeverity.Warning,
-                        AppNotificationPlacement.Desktop);
-                }
-
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        if (PhoneAlertDispatchService.IsConfigured(settings))
-                            await PhoneAlertDispatchService.Instance.SendConfiguredAsync(settings, title, message).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        SteamOfferAuditLog.InfoThrottled(
-                            "steam-login-expired-phone-alert-failed",
-                            "Steam login expired phone alert failed: " + SteamOfferAuditLog.RedactSecrets(ex.Message),
-                            TimeSpan.FromMinutes(10));
-                    }
-                });
+                _host.NotifySteamLoginExpired(title, message);
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                SteamOfferPlatform.Host.InfoThrottled(
                     "steam-login-expired-notify-failed",
-                    "Steam login expired notification failed: " + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                    "Steam login expired notification failed: " + _host.RedactSecrets(ex.Message),
                     TimeSpan.FromMinutes(10));
             }
         }
@@ -1370,9 +1406,9 @@ namespace CS2TradeMonitor.Application.Steam
                 }
                 catch (Exception ex)
                 {
-                    SteamOfferAuditLog.InfoThrottled(
+                    _host.InfoThrottled(
                         "steam-offer-detail-enrich-failed:" + offer.TradeOfferId,
-                        "Steam offer detail enrichment skipped. TradeOfferId=" + offer.TradeOfferId + "; Reason=" + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                        "Steam offer detail enrichment skipped. TradeOfferId=" + offer.TradeOfferId + "; Reason=" + _host.RedactSecrets(ex.Message),
                         TimeSpan.FromMinutes(10));
                 }
             }
@@ -1408,9 +1444,9 @@ namespace CS2TradeMonitor.Application.Steam
                 }
                 catch (Exception ex)
                 {
-                    SteamOfferAuditLog.InfoThrottled(
+                    _host.InfoThrottled(
                         "steam-confirmation-detail-enrich-failed:" + offer.TradeOfferId,
-                        "Steam confirmation detail enrichment skipped. TradeOfferId=" + offer.TradeOfferId + "; Reason=" + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                        "Steam confirmation detail enrichment skipped. TradeOfferId=" + offer.TradeOfferId + "; Reason=" + _host.RedactSecrets(ex.Message),
                         TimeSpan.FromMinutes(5));
                 }
             }
@@ -1445,16 +1481,16 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (SteamAuthExpiredException)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                _host.InfoThrottled(
                     "steam-offer-detail-web-auth-enrich-skipped",
                     "Steam web offer detail enrichment skipped because web session is unavailable; saved session is kept.",
                     TimeSpan.FromMinutes(10));
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                _host.InfoThrottled(
                     "steam-offer-detail-web-enrich-failed",
-                    "Steam web offer detail enrichment skipped. Reason=" + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                    "Steam web offer detail enrichment skipped. Reason=" + _host.RedactSecrets(ex.Message),
                 TimeSpan.FromMinutes(10));
             }
         }
@@ -1472,9 +1508,9 @@ namespace CS2TradeMonitor.Application.Steam
                 }
                 catch (Exception ex)
                 {
-                    SteamOfferAuditLog.InfoThrottled(
+                    _host.InfoThrottled(
                         "steam-offer-web-detail-page-enrich-failed:" + offer.TradeOfferId,
-                        "Steam web detail page enrichment skipped. TradeOfferId=" + offer.TradeOfferId + "; Reason=" + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                        "Steam web detail page enrichment skipped. TradeOfferId=" + offer.TradeOfferId + "; Reason=" + _host.RedactSecrets(ex.Message),
                         TimeSpan.FromMinutes(5));
                 }
             }
@@ -1491,7 +1527,7 @@ namespace CS2TradeMonitor.Application.Steam
                     .Where(x => !string.IsNullOrWhiteSpace(x))
                     .Take(8));
             string foundIds = string.Join(",", byId.Keys.Take(8));
-            SteamOfferAuditLog.InfoThrottled(
+            SteamOfferPlatform.Host.InfoThrottled(
                 "steam-web-detail-lookup-diagnostic",
                 $"Steam web detail lookup. Missing={missingDetails.Count}; DetailIds={byId.Count}; MissingIds={missingIds}; FoundIds={foundIds}",
                 TimeSpan.FromMinutes(2));
@@ -1512,7 +1548,7 @@ namespace CS2TradeMonitor.Application.Steam
             int rawAnonymousCount = anonymousSent.Count;
             if (stillMissing.Count != 1 || anonymousSent.Count != 1)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                SteamOfferPlatform.Host.InfoThrottled(
                     "steam-web-detail-anonymous-skip",
                     $"Steam web anonymous detail skipped. Missing={stillMissing.Count}; AnonymousSent={rawAnonymousCount}",
                     TimeSpan.FromMinutes(2));
@@ -1527,7 +1563,7 @@ namespace CS2TradeMonitor.Application.Steam
                 ApplyTradeOfferDetails(stillMissing[i], enriched);
             }
 
-            SteamOfferAuditLog.InfoThrottled(
+            SteamOfferPlatform.Host.InfoThrottled(
                 "steam-web-detail-anonymous-applied",
                 $"Steam web anonymous detail applied. Count={anonymousSent.Count}; Raw={rawAnonymousCount}",
                 TimeSpan.FromMinutes(2));
@@ -1556,9 +1592,9 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                _host.InfoThrottled(
                     logKey,
-                    "Steam offer detail batch enrichment skipped. Reason=" + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                    "Steam offer detail batch enrichment skipped. Reason=" + _host.RedactSecrets(ex.Message),
                     TimeSpan.FromMinutes(10));
             }
         }

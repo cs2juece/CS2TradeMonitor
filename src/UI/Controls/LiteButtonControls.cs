@@ -378,7 +378,7 @@ namespace CS2TradeMonitor.src.UI.Controls
             Color fill = ResolveFillColor();
             Color border = ResolveBorderColor();
             Color text = ResolveTextColor();
-            int radius = UIUtils.S(3);
+            int radius = UIUtils.S(LiteCorners.Radius);
 
             using (var path = CreateRoundedRect(rect, radius))
             using (var fillBrush = new SolidBrush(fill))
@@ -511,28 +511,31 @@ namespace CS2TradeMonitor.src.UI.Controls
         public LiteNavBtn(string text)
         {
             Text = "  " + text;
-            Size = new Size(UIUtils.S(190), UIUtils.S(40));
+            Size = new Size(UIUtils.S(221), UIUtils.S(46));
             FlatStyle = FlatStyle.Flat;
             FlatAppearance.BorderSize = 0;
             TextAlign = ContentAlignment.MiddleLeft;
-            Font = UIUtils.GetFont("Microsoft YaHei UI", 10F, false);
+            Font = UIUtils.GetFont("Microsoft YaHei UI", 10.5F, false);
             Cursor = Cursors.Hand;
-            Margin = UIUtils.S(new Padding(5, 2, 5, 2));
+            Margin = UIUtils.S(new Padding(9, 2, 9, 2));
             BackColor = UIColors.SidebarBg;
             ForeColor = UIColors.TextMain;
         }
         protected override void OnPaint(PaintEventArgs e)
         {
             Color bg = _isActive ? UIColors.NavSelected : (ClientRectangle.Contains(PointToClient(Cursor.Position)) ? UIColors.NavHover : UIColors.SidebarBg);
+            e.Graphics.Clear(UIColors.SidebarBg);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = LiteCorners.Path(new Rectangle(0, 0, Width - 1, Height - 1), UIUtils.S(LiteCorners.Radius)))
             using (var b = new SolidBrush(bg))
-                e.Graphics.FillRectangle(b, ClientRectangle);
+                e.Graphics.FillPath(b, path);
             if (_isActive)
             {
                 using (var b = new SolidBrush(UIColors.Primary))
                     e.Graphics.FillRectangle(b, 0, UIUtils.S(8), UIUtils.S(3), Height - UIUtils.S(16));
             }
-            Font drawFont = UIUtils.GetFont("Microsoft YaHei UI", 10F, _isActive);
-            TextRenderer.DrawText(e.Graphics, Text, drawFont, new Point(UIUtils.S(12), UIUtils.S(9)), UIColors.TextMain);
+            Font drawFont = UIUtils.GetFont("Microsoft YaHei UI", 10.5F, _isActive);
+            TextRenderer.DrawText(e.Graphics, Text, drawFont, new Point(UIUtils.S(15), UIUtils.S(9)), UIColors.TextMain);
         }
         protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); Invalidate(); }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); Invalidate(); }

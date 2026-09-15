@@ -8,6 +8,7 @@ using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.src.Core.Actions;
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.UI;
+using CS2TradeMonitor.src.UI.Framework;
 
 namespace CS2TradeMonitor.src.UI.Helpers
 {
@@ -454,8 +455,13 @@ namespace CS2TradeMonitor.src.UI.Helpers
 
         public void OpenSettings()
         {
-            DiagnosticsLogger.Info("Settings", "Opening interface settings from main form.");
-            AppActions.ShowInterfaceSettings(_cfg, _ui, (MainForm)_form, AppActions.MainPanelFloatTab, modal: false);
+            DiagnosticsLogger.Info("Settings", "Opening monitoring console from main form.");
+            AppActions.ShowSettingsPage(
+                _cfg,
+                _ui,
+                (MainForm)_form,
+                SettingsPageRegistry.DefaultRouteKey,
+                modal: false);
         }
 
 

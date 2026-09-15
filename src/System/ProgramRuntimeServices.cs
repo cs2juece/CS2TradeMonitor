@@ -1,5 +1,6 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Steam;
+using CS2TradeMonitor.Application.YouPin.PurchaseMonitoring;
 using CS2TradeMonitor.src.Core.Modules;
 using CS2TradeMonitor.src.Core.State;
 using CS2TradeMonitor.src.SystemServices;
@@ -11,6 +12,8 @@ namespace CS2TradeMonitor
     {
         private ProgramRuntimeServices(
             IMonitorModuleHost moduleHost,
+            ILocalInventoryMonitorService localInventoryMonitor,
+            IYouPinPurchaseMonitoringModule youPinPurchaseMonitoring,
             ISteamOfferService steamOffers,
             ISteamSessionKeepAliveService steamSessionKeepAlive,
             IAppConfigState appConfigState,
@@ -18,6 +21,8 @@ namespace CS2TradeMonitor
             SteamConnectivitySupervisor steamConnectivity)
         {
             ModuleHost = moduleHost ?? throw new ArgumentNullException(nameof(moduleHost));
+            LocalInventoryMonitor = localInventoryMonitor ?? throw new ArgumentNullException(nameof(localInventoryMonitor));
+            YouPinPurchaseMonitoring = youPinPurchaseMonitoring ?? throw new ArgumentNullException(nameof(youPinPurchaseMonitoring));
             SteamOffers = steamOffers ?? throw new ArgumentNullException(nameof(steamOffers));
             SteamSessionKeepAlive = steamSessionKeepAlive ?? throw new ArgumentNullException(nameof(steamSessionKeepAlive));
             AppConfigState = appConfigState ?? throw new ArgumentNullException(nameof(appConfigState));
@@ -26,6 +31,10 @@ namespace CS2TradeMonitor
         }
 
         public IMonitorModuleHost ModuleHost { get; }
+
+        public ILocalInventoryMonitorService LocalInventoryMonitor { get; }
+
+        public IYouPinPurchaseMonitoringModule YouPinPurchaseMonitoring { get; }
 
         public ISteamOfferService SteamOffers { get; }
 
@@ -48,6 +57,8 @@ namespace CS2TradeMonitor
 
             return new ProgramRuntimeServices(
                 provider.GetRequiredService<IMonitorModuleHost>(),
+                provider.GetRequiredService<ILocalInventoryMonitorService>(),
+                provider.GetRequiredService<IYouPinPurchaseMonitoringModule>(),
                 provider.GetRequiredService<ISteamOfferService>(),
                 provider.GetRequiredService<ISteamSessionKeepAliveService>(),
                 provider.GetRequiredService<IAppConfigState>(),

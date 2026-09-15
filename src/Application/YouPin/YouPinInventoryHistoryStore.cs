@@ -1,9 +1,9 @@
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.SystemServices;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 
 namespace CS2TradeMonitor.Application.YouPin
@@ -36,7 +36,7 @@ namespace CS2TradeMonitor.Application.YouPin
             try
             {
                 var json = JsonSerializer.Serialize(history, options);
-                RuntimeDataPaths.WriteTextAtomic(path, json);
+                WriteTextAtomic(path, json);
             }
             catch
             {
@@ -168,10 +168,35 @@ namespace CS2TradeMonitor.Application.YouPin
 
                 return CountRetainedEntries(history) != entryCountBefore;
             }
-            catch (Exception ex)
+            catch
             {
-                DiagnosticsLogger.Info("YouPinInventory", $"历史裁剪跳过: {ex.Message}");
                 return false;
+            }
+        }
+
+        private static void WriteTextAtomic(string path, string content)
+        {
+            string? directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            string tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(tempPath, content, new UTF8Encoding(false));
+                File.Move(tempPath, path, overwrite: true);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                }
+                catch
+                {
+                    // Preserve the original write result; stale temp cleanup is best-effort.
+                }
             }
         }
 

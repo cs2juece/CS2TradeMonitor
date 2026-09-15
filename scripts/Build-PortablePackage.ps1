@@ -27,6 +27,9 @@ if ([string]::IsNullOrWhiteSpace($Changelog)) {
 }
 
 $authorizedResourceHashes = [ordered]@{
+    "CS2TradeMonitor.YouPinPrivacyAudit\Resources\hot-top1000.catalog.json.gz" = "3F6944398594D2248B572077A25BC3FF536D8A7AE0C05B684772399C25E89BA6"
+    "CS2TradeMonitor.YouPinPrivacyAudit\Resources\hot-top1000.youpin-mapping.json.gz" = "F2B70A07E9D10FC9E277F58D4D730B07EB91A9294E7D51B75B394F9EF5CA2BB2"
+    "CS2TradeMonitor.YouPinPrivacyAudit\Resources\source-plan-metadata.json" = "B12A6AD84A23CA726EE9A45EA5B311F9D433984D7162FC5FC3F8410E7B611FAA"
     "resources\steamdt_items.json.gz" = "D581F288CFC0F633FAFEFA1265E9CACDE41FBE7486EDBE0A4B7B28AC2905F463"
     "resources\api-help\steamdt-api-key.png" = "F0EE20B3C9BE47FE091C6CAC23DA61CBEBC04645994BFD4A36BEFF7124DCA833"
     "resources\api-help\steamdt-api-menu.png" = "9381E560F6A76B80E898ED17C9155FE6183780E67800FD2213BD1E6B01036DCF"
@@ -201,6 +204,7 @@ function Assert-PackageFiles {
         "app\$appName.Updater.exe",
         "app\program-files.json",
         "docs\THIRD_PARTY_NOTICES.txt",
+        "docs\LICENSE.txt",
         "使用说明(必读).txt",
         "resources\api-help\steamdt-api-key.png",
         "resources\api-help\steamdt-api-menu.png",
@@ -464,6 +468,9 @@ function Assert-ZipStructure {
         if ($names -notcontains "$TopDirectory/docs/THIRD_PARTY_NOTICES.txt") {
             throw "ZIP is missing docs/THIRD_PARTY_NOTICES.txt."
         }
+        if ($names -notcontains "$TopDirectory/docs/LICENSE.txt") {
+            throw "ZIP is missing docs/LICENSE.txt."
+        }
         $topDirectoryPattern = [regex]::Escape($TopDirectory)
         $rootDocs = @($names | Where-Object {
                 $_ -match "^$topDirectoryPattern/[^/]+\.txt$" `
@@ -600,6 +607,8 @@ Assert-PublishedExecutableVersion -Path $bootstrapperExe -Label $appName
 Assert-PublishedExecutableVersion -Path $updaterExe -Label "$appName.Updater"
 Copy-Item -LiteralPath $bootstrapperExe -Destination (Join-Path $publishDir "$appName.exe") -Force
 Copy-Item -LiteralPath $updaterExe -Destination (Join-Path $appPublishDir "$appName.Updater.exe") -Force
+Copy-Item -LiteralPath (Join-Path $projectDir "LICENSE") `
+    -Destination (Join-Path $publishDir "docs\LICENSE.txt") -Force
 
 Get-ChildItem -LiteralPath $publishDir -Filter "*.xml" -File -Recurse -ErrorAction SilentlyContinue |
     Remove-Item -Force

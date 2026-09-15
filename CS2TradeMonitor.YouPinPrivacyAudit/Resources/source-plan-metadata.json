@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "captureSetId": "20260830T121655560_\u002B0000-dual-99f831911814",
+  "capturedAt": "2026-08-30T12:16:55.5603629+00:00",
+  "sourceSha256": "cd7d4fdf87658f6399d3e19710d960156d14c3c5ea0de211c0c72e4c65e20c7e",
+  "fingerprint": "bd95502717a5ebadccd204f34d9594c3095809a89c735263b8a4e4961392a8ea",
+  "ordering": "CategoryRoundRobin",
+  "candidateCount": 1000,
+  "resolvedCount": 1000,
+  "unresolvedCount": 0,
+  "batchSize": 20,
+  "batchCount": 50,
+  "isFullyResolved": true,
+  "categoryCounts": {
+    "CustomPlayer": 33,
+    "Equipment": 1,
+    "Hands": 136,
+    "Knife": 93,
+    "MusicKit": 10,
+    "Pistol": 214,
+    "Rifle": 310,
+    "SMG": 51,
+    "Shotgun": 7,
+    "Sniper": 87,
+    "Sticker": 26,
+    "WeaponCase": 32
+  }
+}

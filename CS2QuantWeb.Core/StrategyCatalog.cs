@@ -2,6 +2,46 @@ namespace CS2QuantWeb.Core;
 
 public static class StrategyCatalog
 {
+    public static IReadOnlyList<StrategyConditionPreset> ConditionPresets { get; } =
+    [
+        new(
+            "kdj-golden-cross",
+            "KDJ 金叉",
+            "K 线上穿 D 线，常用于识别动量转强。",
+            new StrategyCondition("kdj-sub.k", StrategyComparison.CrossAbove, "kdj-sub.d"),
+            new IndicatorSelection("kdj-sub", "KDJ", IndicatorPlacement.Sub, [9, 3, 3])),
+        new(
+            "kdj-dead-cross",
+            "KDJ 死叉",
+            "K 线下穿 D 线，常用于识别动量转弱。",
+            new StrategyCondition("kdj-sub.k", StrategyComparison.CrossBelow, "kdj-sub.d"),
+            new IndicatorSelection("kdj-sub", "KDJ", IndicatorPlacement.Sub, [9, 3, 3])),
+        new(
+            "obv-cross-above-average",
+            "OBV 上穿均线",
+            "OBV 上穿 MAOBV，用成交量累积趋势确认转强。",
+            new StrategyCondition("obv-sub.obv", StrategyComparison.CrossAbove, "obv-sub.maobv"),
+            new IndicatorSelection("obv-sub", "OBV", IndicatorPlacement.Sub, [30])),
+        new(
+            "obv-cross-below-average",
+            "OBV 下穿均线",
+            "OBV 下穿 MAOBV，用成交量累积趋势确认转弱。",
+            new StrategyCondition("obv-sub.obv", StrategyComparison.CrossBelow, "obv-sub.maobv"),
+            new IndicatorSelection("obv-sub", "OBV", IndicatorPlacement.Sub, [30])),
+        new(
+            "boll-contracting",
+            "BOLL 收缩",
+            "布林带宽较上一根 K 线缩小；带宽按（上轨－下轨）÷中轨计算。",
+            new StrategyCondition("boll-main.bandwidthChange", StrategyComparison.LessThan, Constant: 0),
+            new IndicatorSelection("boll-main", "BOLL", IndicatorPlacement.Main, [20, 2])),
+        new(
+            "boll-expanding",
+            "BOLL 扩张",
+            "布林带宽较上一根 K 线放大，可与收缩条件配对作为退出规则。",
+            new StrategyCondition("boll-main.bandwidthChange", StrategyComparison.GreaterThan, Constant: 0),
+            new IndicatorSelection("boll-main", "BOLL", IndicatorPlacement.Main, [20, 2]))
+    ];
+
     public static IReadOnlyList<StrategyDefinition> BuiltIns { get; } =
     [
         new(

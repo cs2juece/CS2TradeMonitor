@@ -145,7 +145,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             var avatar = new MarketAlertAvatar();
             var title = CreateTextLabel("大盘预警", 16F, FontStyle.Bold, UIColors.TextMain);
             _headerStatusPill = new MarketAlertPill { Width = UIUtils.S(66), Height = UIUtils.S(24) };
-            var description = CreateTextLabel("监控 QAQ / SteamDT 指数点位与涨跌幅。", 9F, FontStyle.Regular, UIColors.TextSub);
+            var description = CreateTextLabel("监控 QAQ / SteamDT 指数与涨跌幅。", 9F, FontStyle.Regular, UIColors.TextSub);
             var test = new LiteButton("发送测试预警", true) { Width = UIUtils.S(132), Height = UIUtils.S(38) };
             var openData = new LiteButton("查看大盘数据源", false) { Width = UIUtils.S(142), Height = UIUtils.S(38) };
             test.Click += (_, __) => SendTestAlert();
@@ -287,27 +287,19 @@ namespace CS2TradeMonitor.src.UI.Framework
             _ruleCards.Add(binding);
             card.Layout += (_, __) =>
             {
-                int pad = UIUtils.S(18);
-                int y = UIUtils.S(16);
-                int enabledW = UIUtils.S(86);
-                int refreshW = UIUtils.S(92);
-                int indexW = UIUtils.S(112);
-                enabledPill.SetBounds(card.Width - pad - enabledW, y + UIUtils.S(1), enabledW, UIUtils.S(26));
-                refreshPill.SetBounds(enabledPill.Left - UIUtils.S(8) - refreshW, enabledPill.Top, refreshW, UIUtils.S(26));
-                indexPill.SetBounds(refreshPill.Left - UIUtils.S(8) - indexW, enabledPill.Top, indexW, UIUtils.S(26));
-                int titleWidth = Math.Max(1, indexPill.Left - pad - UIUtils.S(10));
-                string compactTitle = titleWidth < UIUtils.S(92)
-                    ? titleText.Replace(" 指数规则", "", StringComparison.Ordinal)
-                    : titleWidth < UIUtils.S(124)
-                        ? titleText.Replace(" 指数规则", " 规则", StringComparison.Ordinal)
-                        : titleText;
-                if (!string.Equals(title.Text, compactTitle, StringComparison.Ordinal))
-                    title.Text = compactTitle;
-                title.SetBounds(pad, y, titleWidth, UIUtils.S(28));
-                int rowY = UIUtils.S(70);
+                MarketAlertRuleCardHeaderLayout layout = MarketAlertRedesignPageModel.BuildRuleCardHeaderLayout(card.Width);
+                title.Bounds = layout.TitleBounds;
+                indexPill.Bounds = layout.IndexPillBounds;
+                refreshPill.Bounds = layout.RefreshPillBounds;
+                enabledPill.Bounds = layout.EnabledPillBounds;
+                int rowY = layout.RowStartY;
                 foreach (RuleRowBinding row in binding.Rows)
                 {
-                    row.Row.SetBounds(pad, rowY, Math.Max(1, card.Width - pad * 2), UIUtils.S(72));
+                    row.Row.SetBounds(
+                        layout.TitleBounds.Left,
+                        rowY,
+                        Math.Max(1, card.Width - layout.TitleBounds.Left * 2),
+                        UIUtils.S(72));
                     rowY += UIUtils.S(72);
                 }
             };
@@ -1069,6 +1061,36 @@ namespace CS2TradeMonitor.src.UI.Framework
                 thresholdBounds);
         }
 
+        public static MarketAlertRuleCardHeaderLayout BuildRuleCardHeaderLayout(int cardWidth)
+        {
+            int pad = UIUtils.S(18);
+            int gap = UIUtils.S(8);
+            int availableWidth = Math.Max(3, cardWidth - pad * 2);
+            int indexWidth = UIUtils.S(104);
+            int refreshWidth = UIUtils.S(96);
+            int enabledWidth = UIUtils.S(96);
+            int desiredWidth = indexWidth + refreshWidth + enabledWidth + gap * 2;
+            if (desiredWidth > availableWidth)
+            {
+                int pillWidth = Math.Max(1, (availableWidth - gap * 2) / 3);
+                indexWidth = pillWidth;
+                refreshWidth = pillWidth;
+                enabledWidth = Math.Max(1, availableWidth - gap * 2 - pillWidth * 2);
+            }
+
+            int pillTop = UIUtils.S(44);
+            int pillHeight = UIUtils.S(26);
+            int enabledLeft = cardWidth - pad - enabledWidth;
+            int refreshLeft = enabledLeft - gap - refreshWidth;
+            int indexLeft = refreshLeft - gap - indexWidth;
+            return new MarketAlertRuleCardHeaderLayout(
+                new Rectangle(pad, UIUtils.S(12), availableWidth, UIUtils.S(28)),
+                new Rectangle(indexLeft, pillTop, indexWidth, pillHeight),
+                new Rectangle(refreshLeft, pillTop, refreshWidth, pillHeight),
+                new Rectangle(enabledLeft, pillTop, enabledWidth, pillHeight),
+                UIUtils.S(78));
+        }
+
         public static int CountEnabledBuiltinRules(IEnumerable<MarketAlertRule> rules, string sourceId)
         {
             ArgumentNullException.ThrowIfNull(rules);
@@ -1101,6 +1123,13 @@ namespace CS2TradeMonitor.src.UI.Framework
     }
 
     internal readonly record struct MarketAlertSnapshotView(string IndexText, Color IndexColor, string RefreshText);
+
+    internal readonly record struct MarketAlertRuleCardHeaderLayout(
+        Rectangle TitleBounds,
+        Rectangle IndexPillBounds,
+        Rectangle RefreshPillBounds,
+        Rectangle EnabledPillBounds,
+        int RowStartY);
 
     internal readonly record struct MarketAlertRuleRowLayout(
         Rectangle IconBounds,

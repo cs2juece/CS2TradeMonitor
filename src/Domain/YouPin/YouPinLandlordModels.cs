@@ -150,7 +150,8 @@ namespace CS2TradeMonitor.Domain.YouPin
         Observed,
         Succeeded,
         Failed,
-        Skipped
+        Skipped,
+        WaitingForRateLimit
     }
 
     public enum YouPinLandlordCallbackState
@@ -193,7 +194,7 @@ namespace CS2TradeMonitor.Domain.YouPin
         public const decimal ExclusiveRentLimit = 0.72m;
         public const decimal MaximumAllowedRent = 0.71m;
 
-        public static YouPinLandlordWeeklyFreeRule Disabled { get; } = new(false, 0m, 0m);
+        public static YouPinLandlordWeeklyFreeRule Disabled { get; } = new(false, 0m, 1500m);
 
         public bool Matches(decimal itemValue)
         {

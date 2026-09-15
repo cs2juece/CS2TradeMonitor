@@ -84,6 +84,7 @@ app.MapGet("/api/research/catalog", () => Results.Ok(new
     indicators = IndicatorCatalog.All,
     defaultIndicators = IndicatorCatalog.DefaultSelections,
     strategies = StrategyCatalog.BuiltIns,
+    conditionPresets = StrategyCatalog.ConditionPresets,
     defaultLockMode = ExecutionLockMode.None,
     supportedComparisons = Enum.GetValues<StrategyComparison>()
 }));

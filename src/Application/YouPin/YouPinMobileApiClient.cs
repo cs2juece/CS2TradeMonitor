@@ -1,4 +1,3 @@
-using CS2TradeMonitor.src.SystemServices;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -10,7 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Win32;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.Application.YouPin
 {
@@ -28,7 +27,7 @@ namespace CS2TradeMonitor.Application.YouPin
         private static string _profileError = "";
         private static string? _deviceProfilePathForTests;
         private static string DeviceProfilePath => _deviceProfilePathForTests
-            ?? RuntimeDataPaths.GetSecureFilePath(DeviceProfileFileName);
+            ?? YouPinMobileApiPlatform.Host.GetSecureFilePath(DeviceProfileFileName);
 
         public static StringContent JsonContent(object payload)
         {
@@ -184,12 +183,27 @@ namespace CS2TradeMonitor.Application.YouPin
 
             var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                gate.ReportRateLimit("HTTP 429 Too Many Requests");
+                gate.ReportRateLimit("HTTP 429 Too Many Requests", ReadRetryAfter(response), retryable: true);
             else if (IsTransientServerError(response.StatusCode))
                 gate.ReportTransientFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
             else if ((int)response.StatusCode < 400)
                 gate.ReportSuccess();
             return response;
+        }
+
+        internal static TimeSpan GetRateLimitRetryAfter(HttpResponseMessage response)
+        {
+            TimeSpan delay = ReadRetryAfter(response);
+            if (EndpointGates.TryGetValue(BuildEndpointKey(response.RequestMessage?.RequestUri), out var gate)
+                && gate.CooldownRemaining > delay)
+                delay = gate.CooldownRemaining;
+            return delay > TimeSpan.FromMinutes(5) ? delay : TimeSpan.FromMinutes(5);
+        }
+
+        private static TimeSpan ReadRetryAfter(HttpResponseMessage response)
+        {
+            var header = response.Headers.RetryAfter;
+            return header?.Delta ?? (header?.Date - DateTimeOffset.UtcNow) ?? TimeSpan.Zero;
         }
 
         public static async Task<JsonDocument> ReadJsonDocumentAsync(HttpResponseMessage response, string action)
@@ -356,13 +370,13 @@ namespace CS2TradeMonitor.Application.YouPin
                 if (LooksLikeRateLimitOrRiskControl(body))
                     gate.ReportRateLimit(Sanitize(body));
                 if (LooksLikeSignatureFailure(body))
-                    DiagnosticsLogger.InfoThrottled(
+                    YouPinMobileApiPlatform.Host.InfoThrottled(
                         "YouPin",
                         "signature-risk:" + BuildEndpointKey(uri),
                         "悠悠有品返回疑似签名/风控提示：" + Sanitize(body),
                         TimeSpan.FromMinutes(30));
                 if (LooksLikeEncryptionRequirement(body))
-                    DiagnosticsLogger.InfoThrottled(
+                    YouPinMobileApiPlatform.Host.InfoThrottled(
                         "YouPin",
                         "encryption-risk:" + BuildEndpointKey(uri),
                         "悠悠有品返回疑似加密/解密提示：" + Sanitize(body),
@@ -422,8 +436,8 @@ namespace CS2TradeMonitor.Application.YouPin
             }
             catch (Exception ex)
             {
-                _profileError = "悠悠设备档案读取失败：" + DiagnosticsLogger.Redact(ex.Message);
-                DiagnosticsLogger.Error("YouPin", _profileError);
+                _profileError = "悠悠设备档案读取失败：" + YouPinMobileApiPlatform.Host.Redact(ex.Message);
+                YouPinMobileApiPlatform.Host.Error("YouPin", _profileError);
                 throw new InvalidOperationException(_profileError, ex);
             }
         }
@@ -443,13 +457,15 @@ namespace CS2TradeMonitor.Application.YouPin
         {
             try
             {
-                RuntimeDataPaths.WriteTextAtomic(DeviceProfilePath, JsonSerializer.Serialize(profile, ProfileJsonOptions));
+                YouPinMobileApiPlatform.Host.WriteTextAtomic(
+                    DeviceProfilePath,
+                    JsonSerializer.Serialize(profile, ProfileJsonOptions));
                 _profileError = "";
             }
             catch (Exception ex)
             {
-                _profileError = "悠悠设备档案保存失败：" + DiagnosticsLogger.Redact(ex.Message);
-                DiagnosticsLogger.Error("YouPin", _profileError);
+                _profileError = "悠悠设备档案保存失败：" + YouPinMobileApiPlatform.Host.Redact(ex.Message);
+                YouPinMobileApiPlatform.Host.Error("YouPin", _profileError);
                 throw new InvalidOperationException(_profileError, ex);
             }
         }
@@ -537,18 +553,7 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private static string GetMachineGuid()
         {
-            try
-            {
-                string? value = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography", "MachineGuid", null)?.ToString();
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value.Trim();
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.Ignored("YouPin", "GetMachineGuid", ex, retryable: true, category: "DeviceFingerprint");
-            }
-
-            return Environment.MachineName + "|" + Environment.UserName;
+            return YouPinMobileApiPlatform.Host.GetMachineFingerprint();
         }
 
         private static string Sha256Hex(string text)
@@ -620,6 +625,9 @@ namespace CS2TradeMonitor.Application.YouPin
             private DateTime _cooldownUntilUtc = DateTime.MinValue;
             private string _cooldownReason = "";
             private int _rateLimitFailures;
+            private bool _retryableRateLimit;
+
+            public TimeSpan CooldownRemaining => _cooldownUntilUtc - DateTime.UtcNow;
 
             public async Task WaitAsync(Uri? uri, CancellationToken cancellationToken)
             {
@@ -630,7 +638,10 @@ namespace CS2TradeMonitor.Application.YouPin
                     if (now < _cooldownUntilUtc)
                     {
                         string until = _cooldownUntilUtc.ToLocalTime().ToString("MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
-                        throw new InvalidOperationException($"悠悠有品接口限流冷却中，已停止请求。原因：{_cooldownReason}；下一步：{until} 后自动重试。");
+                        string message = $"悠悠有品接口限流冷却中，已停止请求。原因：{_cooldownReason}；下一步：{until} 后自动重试。";
+                        if (_retryableRateLimit)
+                            throw new YouPinRateLimitException(message, _cooldownUntilUtc - now);
+                        throw new InvalidOperationException(message);
                     }
 
                     TimeSpan wait = (_lastRequestUtc + MinInterval) - now;
@@ -645,16 +656,21 @@ namespace CS2TradeMonitor.Application.YouPin
                 }
             }
 
-            public void ReportRateLimit(string reason)
+            public void ReportRateLimit(string reason, TimeSpan? retryAfter = null, bool retryable = false)
             {
                 _rateLimitFailures = Math.Min(_rateLimitFailures + 1, 4);
                 int minutes = Math.Min(30, 5 * (1 << (_rateLimitFailures - 1)));
-                _cooldownUntilUtc = DateTime.UtcNow.AddMinutes(minutes);
+                TimeSpan delay = TimeSpan.FromMinutes(minutes);
+                if (retryAfter > delay)
+                    delay = retryAfter.Value;
+                _cooldownUntilUtc = DateTime.UtcNow.Add(delay);
+                _retryableRateLimit = retryable;
                 _cooldownReason = string.IsNullOrWhiteSpace(reason) ? "请求过于频繁" : Sanitize(reason);
             }
 
             public void ReportTransientFailure(string reason)
             {
+                _retryableRateLimit = false;
                 _rateLimitFailures = Math.Min(_rateLimitFailures + 1, 3);
                 int seconds = Math.Min(60, 5 * (1 << (_rateLimitFailures - 1)));
                 _cooldownUntilUtc = DateTime.UtcNow.AddSeconds(seconds);
@@ -663,6 +679,7 @@ namespace CS2TradeMonitor.Application.YouPin
 
             public void ReportSuccess()
             {
+                _retryableRateLimit = false;
                 _rateLimitFailures = 0;
                 _cooldownUntilUtc = DateTime.MinValue;
                 _cooldownReason = "";

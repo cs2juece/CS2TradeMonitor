@@ -757,6 +757,16 @@ function renderStrategyEditor() {
   elements.saveStrategyButton.textContent = strategy.isBuiltIn ? "保存为我的策略" : "保存修改";
   renderConditions(elements.entryConditions, strategy.entry.conditions, "entry");
   renderConditions(elements.exitConditions, strategy.exit.conditions, "exit");
+  renderConditionPresetOptions();
+}
+
+function renderConditionPresetOptions() {
+  const options = ["<option value=\"\">快捷添加：KDJ / OBV / BOLL…</option>"];
+  for (const preset of state.catalog?.conditionPresets || [])
+    options.push(`<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`);
+  elements.strategyDialog.querySelectorAll("[data-condition-preset]").forEach(select => {
+    select.innerHTML = options.join("");
+  });
 }
 
 function renderConditions(container, conditions, side) {
@@ -870,6 +880,10 @@ function handleStrategyClick(event) {
 
 function handleStrategyFieldChange(event) {
   if (!state.pendingStrategy) return;
+  if (event.target.matches("[data-condition-preset]")) {
+    addConditionPreset(event.target);
+    return;
+  }
   if (event.target === elements.strategyName) state.pendingStrategy.name = elements.strategyName.value;
   if (event.target === elements.entryMatchMode) state.pendingStrategy.entry.matchMode = elements.entryMatchMode.value;
   if (event.target === elements.exitMatchMode) state.pendingStrategy.exit.matchMode = elements.exitMatchMode.value;
@@ -888,6 +902,35 @@ function handleStrategyFieldChange(event) {
     condition.constant = constant ? Number(input.value || 0) : null;
   }
   if (role === "constant") condition.constant = event.target.value === "" ? null : Number(event.target.value);
+}
+
+function addConditionPreset(select) {
+  const preset = state.catalog?.conditionPresets?.find(item => item.id === select.value);
+  if (!preset) return;
+  const rules = select.dataset.side === "entry" ? state.pendingStrategy.entry : state.pendingStrategy.exit;
+  if (rules.conditions.length >= 12) {
+    elements.strategyEditHint.textContent = "每组最多 12 个条件。";
+    select.value = "";
+    return;
+  }
+
+  const selections = strategyIndicatorSelections();
+  const selectedIndicator = selections.find(item => item.code === preset.indicator.code) || clone(preset.indicator);
+  const condition = clone(preset.condition);
+  condition.left = remapIndicatorReference(condition.left, preset.indicator.id, selectedIndicator.id);
+  condition.right = remapIndicatorReference(condition.right, preset.indicator.id, selectedIndicator.id);
+  rules.conditions.push(condition);
+  state.pendingStrategy.indicators = [...(state.pendingStrategy.indicators || []), selectedIndicator]
+    .filter((selection, index, all) => all.findIndex(candidate => candidate.id === selection.id) === index);
+  elements.strategyEditHint.textContent = `${preset.name}：${preset.description}`;
+  renderConditions(elements.entryConditions, state.pendingStrategy.entry.conditions, "entry");
+  renderConditions(elements.exitConditions, state.pendingStrategy.exit.conditions, "exit");
+  select.value = "";
+}
+
+function remapIndicatorReference(reference, sourceId, targetId) {
+  if (!reference || sourceId === targetId || !reference.startsWith(`${sourceId}.`)) return reference;
+  return `${targetId}${reference.slice(sourceId.length)}`;
 }
 
 async function saveStrategy(event) {

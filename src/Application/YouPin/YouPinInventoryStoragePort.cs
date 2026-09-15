@@ -3,7 +3,7 @@ using CS2TradeMonitor.src.Core;
 
 namespace CS2TradeMonitor.Application.YouPin
 {
-    internal interface IYouPinInventoryStorageAdapter
+    public interface IYouPinInventoryStorageAdapter
     {
         Task<YouPinInventoryStorageViewState> ReadAsync(
             Settings settings,
@@ -16,5 +16,5 @@ namespace CS2TradeMonitor.Application.YouPin
             CancellationToken cancellationToken);
     }
 
-    internal sealed record YouPinInventoryStorageWriteResult(bool Accepted, string Message);
+    public sealed record YouPinInventoryStorageWriteResult(bool Accepted, string Message);
 }

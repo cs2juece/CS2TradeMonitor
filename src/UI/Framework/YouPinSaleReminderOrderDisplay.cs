@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.src.UI.Framework
 {
@@ -78,16 +79,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         }
 
         public static bool IsActionableQuoteOrder(YouPinSaleOrder order)
-        {
-            if (YouPinSaleOrderActionResolver.IsPendingBuyQuote(order))
-                return true;
-
-            var action = YouPinSaleOrderActionResolver.Resolve(order);
-            return action.CanRun
-                && (action.Kind == YouPinSaleOrderActionKind.SendOffer
-                    || action.Kind == YouPinSaleOrderActionKind.ConfirmOffer
-                    || IsRentalSteamProcessingAction(order, action));
-        }
+            => YouPinQuoteActionability.IsActionableQuoteOrder(order);
 
         public static string BuildCompactQuoteMeta(YouPinSaleOrder order)
         {

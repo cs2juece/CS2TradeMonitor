@@ -2,7 +2,6 @@ using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Market;
 using CS2TradeMonitor.Domain.YouPin;
 using CS2TradeMonitor.src.Core;
-using CS2TradeMonitor.src.SystemServices;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
@@ -329,7 +328,7 @@ namespace CS2TradeMonitor.Application.YouPin
             ArgumentNullException.ThrowIfNull(command);
             YouPinCredential credential = GetRequiredCredential(settings);
             string device = ResolveDeviceToken(credential, settings);
-            int? compensationType = await InitializeRepriceAsync(
+            YouPinLandlordRepriceProfile? profile = await InitializeRepriceAsync(
                 command.ListingId,
                 credential,
                 device,
@@ -337,12 +336,20 @@ namespace CS2TradeMonitor.Application.YouPin
                 actionId,
                 cancellationToken).ConfigureAwait(false);
 
+            if (profile == null)
+            {
+                return new YouPinLandlordWriteResult(false,
+                    "未能确认商品原有的 0CD 和赔付配置，或需要续期，已跳过改价")
+                { Submitted = false };
+            }
+
             long numericListingId = ParseLong(command.ListingId);
             if (numericListingId <= 0)
             {
                 return new YouPinLandlordWriteResult(
                     false,
-                    "悠悠货架商品标识不是有效数字，已停止改价");
+                    "悠悠货架商品标识不是有效数字，已停止改价")
+                { Submitted = false };
             }
 
             var stopwatch = Stopwatch.StartNew();
@@ -350,7 +357,6 @@ namespace CS2TradeMonitor.Application.YouPin
             var commodity = new Dictionary<string, object>
             {
                 ["CommodityId"] = numericListingId,
-                ["CompensationType"] = compensationType ?? 0,
                 ["IsCanLease"] = command.IsCanLease,
                 ["IsCanSold"] = command.IsCanSold,
                 ["LeaseDeposit"] = command.Deposit.ToString("0.##", CultureInfo.InvariantCulture),
@@ -358,6 +364,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 ["LeaseUnitPrice"] = command.ShortRent,
                 ["Price"] = command.SellPrice
             };
+            profile.ApplyTo(commodity);
             if (command.LongRent > 0m)
                 commodity["LongLeaseUnitPrice"] = command.LongRent;
 
@@ -370,34 +377,93 @@ namespace CS2TradeMonitor.Application.YouPin
                 "YouPinLandlord",
                 $"Lease price write contract selected. Run={NormalizeCorrelationId(runId)}; "
                 + $"Action={NormalizeCorrelationId(actionId)}; CommodityIdType=Int64; "
-                + $"CompensationType={compensationType ?? 0}; "
-                + $"CompensationProfileFound={compensationType.HasValue}; "
+                + $"CompensationType={profile.CompensationType}; CompensationProfileFound=True; "
+                + $"SupportZeroCD={profile.SupportZeroCd}; PricingType={profile.PricingType}; "
                 + $"LongRentIncluded={command.LongRent > 0m}");
             YouPinMobileApiClient.ApplyHeaders(request, credential.Token, device, credential.Uk);
-            using HttpResponseMessage response = await YouPinMobileApiClient.SendAsync(
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                using HttpResponseMessage response = await YouPinMobileApiClient.SendAsync(
                 _http,
                 request,
                 "修改悠悠租赁价格",
                 cancellationToken).ConfigureAwait(false);
-            EnsureHttpSuccess(response, "修改悠悠租赁价格");
-            using JsonDocument document = await YouPinMobileApiClient.ReadJsonDocumentAsync(
-                response,
-                "修改悠悠租赁价格").ConfigureAwait(false);
-            LogLeasePriceWriteResponse(
-                response,
-                document.RootElement,
-                runId,
-                actionId);
-            EnsureApiSuccess(document.RootElement, "修改悠悠租赁价格");
+                EnsureHttpSuccess(response, "修改悠悠租赁价格");
+                using JsonDocument document = await YouPinMobileApiClient.ReadJsonDocumentAsync(
+                    response,
+                    "修改悠悠租赁价格").ConfigureAwait(false);
+                LogLeasePriceWriteResponse(
+                    response,
+                    document.RootElement,
+                    runId,
+                    actionId);
+                EnsureApiSuccess(document.RootElement, "修改悠悠租赁价格");
 
-            bool success = ParseWriteSuccess(document.RootElement, command.ListingId, out string message);
-            stopwatch.Stop();
-            _diagnostics.Info(
-                "YouPinLandlord",
-                $"Lease price write completed. Run={NormalizeCorrelationId(runId)}; "
-                + $"Action={NormalizeCorrelationId(actionId)}; Success={success}; "
-                + $"ElapsedMs={stopwatch.ElapsedMilliseconds}");
-            return new YouPinLandlordWriteResult(success, Redact(message));
+                bool success = ParseWriteSuccess(document.RootElement, command.ListingId, out string message);
+                stopwatch.Stop();
+                _diagnostics.Info(
+                    "YouPinLandlord",
+                    $"Lease price write completed. Run={NormalizeCorrelationId(runId)}; "
+                    + $"Action={NormalizeCorrelationId(actionId)}; Success={success}; "
+                    + $"ElapsedMs={stopwatch.ElapsedMilliseconds}");
+                if (!success)
+                    return new YouPinLandlordWriteResult(false, Redact(message));
+
+                // A stopped scan must still reconcile a write already accepted by the platform.
+                YouPinLandlordRepriceProfile? confirmed = await VerifyRepriceProfileAsync(
+                    command.ListingId, credential, device, runId, actionId,
+                    cancellationToken).ConfigureAwait(false);
+                bool preserved = profile == confirmed;
+                _diagnostics.Info("YouPinLandlord",
+                    $"Lease price configuration rechecked. Run={NormalizeCorrelationId(runId)}; "
+                    + $"Action={NormalizeCorrelationId(actionId)}; Preserved={preserved}; "
+                    + $"BeforeZeroCD={profile.SupportZeroCd}; AfterZeroCD={confirmed?.SupportZeroCd}");
+                return preserved
+                    ? new YouPinLandlordWriteResult(true, Redact(message) + "；已确认原有 0CD 和赔付配置保持不变")
+                    : new YouPinLandlordWriteResult(false,
+                        "改价已提交，但原有 0CD 或赔付配置发生变化或无法核实，请在悠悠端检查后再开启自动改价")
+                    { RequiresManualReview = true };
+            }
+            catch (YouPinRateLimitException)
+            {
+                // No accepted write: the executor will wait and revalidate before retrying.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _diagnostics.Info("YouPinLandlord",
+                    $"Lease price write outcome uncertain. Run={NormalizeCorrelationId(runId)}; "
+                    + $"Action={NormalizeCorrelationId(actionId)}; ErrorType={ex.GetType().Name}; "
+                    + $"Detail={Redact(ex.Message)}");
+                return new YouPinLandlordWriteResult(false,
+                    "改价提交或写后配置核验未完成，结果待确认；"
+                    + ex.GetType().Name + "：" + Redact(ex.Message)
+                    + "；请在悠悠端检查后再开启自动改价")
+                { RequiresManualReview = true };
+            }
+        }
+
+        private async Task<YouPinLandlordRepriceProfile?> VerifyRepriceProfileAsync(
+            string listingId, YouPinCredential credential, string device, string runId,
+            string actionId, CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                try
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    return await InitializeRepriceAsync(listingId, credential, device, runId, actionId,
+                        timeout.Token).ConfigureAwait(false);
+                }
+                catch (YouPinRateLimitException ex)
+                {
+                    _diagnostics.Info("YouPinLandlord",
+                        $"Lease configuration verification rate limited; retrying read only after {ex.RetryAfter.TotalSeconds:0} seconds.");
+                    // The PUT already succeeded. Retry only the configuration read, never the write.
+                    await _delayAsync(ex.RetryAfter, cancellationToken).ConfigureAwait(false);
+                }
+            }
         }
 
         public async Task<YouPinLandlordInventoryWriteResult> ListInventoryAsync(
@@ -1017,7 +1083,7 @@ namespace CS2TradeMonitor.Application.YouPin
             return listing;
         }
 
-        private async Task<int?> InitializeRepriceAsync(
+        private async Task<YouPinLandlordRepriceProfile?> InitializeRepriceAsync(
             string listingId,
             YouPinCredential credential,
             string device,
@@ -1052,28 +1118,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 actionId,
                 "Contract=change-price-init-v3");
             EnsureApiSuccess(document.RootElement, "初始化悠悠租赁改价");
-            return ParseRepriceCompensationType(document.RootElement, listingId);
-        }
-
-        private static int? ParseRepriceCompensationType(JsonElement root, string listingId)
-        {
-            if (!TryGetProperty(root, out JsonElement data, "data", "Data")
-                || !TryGetProperty(
-                    data,
-                    out JsonElement compensationMap,
-                    "normalLeaseCompensationMap",
-                    "NormalLeaseCompensationMap")
-                || !TryGetProperty(compensationMap, out JsonElement profile, listingId)
-                || !TryGetProperty(
-                    profile,
-                    out _,
-                    "compensationTypeCode",
-                    "CompensationTypeCode"))
-            {
-                return null;
-            }
-
-            return GetInt(profile, "compensationTypeCode", "CompensationTypeCode");
+            return YouPinLandlordRepriceProfile.Parse(document.RootElement, listingId);
         }
 
         private async Task<IReadOnlyList<YouPinLandlordRemoteListing>> ReadShelfAsync(
@@ -1694,6 +1739,9 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private static void EnsureHttpSuccess(HttpResponseMessage response, string action)
         {
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                throw new YouPinRateLimitException($"{action}失败：HTTP 429 Too Many Requests",
+                    YouPinMobileApiClient.GetRateLimitRetryAfter(response));
             if (!response.IsSuccessStatusCode)
                 throw new InvalidOperationException($"{action}失败：HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
         }

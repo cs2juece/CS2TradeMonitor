@@ -1,11 +1,7 @@
-using CS2TradeMonitor.src.SystemServices;
-using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.src.Core.Lifecycle;
-using CS2TradeMonitor.Application;
 using CS2TradeMonitor.Application.Abstractions;
-using CS2TradeMonitor.Application.Notify;
-using CS2TradeMonitor.Application.Steam;
 using CS2TradeMonitor.Domain.YouPin;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
@@ -47,9 +43,44 @@ namespace CS2TradeMonitor.Application.YouPin
         };
 
         private static YouPinSaleReminderService? _instance;
-        public static YouPinSaleReminderService Instance => _instance ??= new YouPinSaleReminderService();
+        private static readonly object InstanceGate = new();
 
-        private readonly IYouPinAuthService _authService;
+        public static YouPinSaleReminderService Instance
+        {
+            get
+            {
+                lock (InstanceGate)
+                {
+                    return _instance ??= YouPinSaleReminderPlatform.CreateService();
+                }
+            }
+        }
+
+        public static void ConfigurePlatform(
+            IYouPinCredentialSource credentialSource,
+            IYouPinHttpClientFactory httpClientFactory,
+            IYouPinSaleReminderHost host,
+            IYouPinMobileApiHost mobileApiHost)
+        {
+            ArgumentNullException.ThrowIfNull(credentialSource);
+            ArgumentNullException.ThrowIfNull(httpClientFactory);
+            ArgumentNullException.ThrowIfNull(host);
+            ArgumentNullException.ThrowIfNull(mobileApiHost);
+
+            lock (InstanceGate)
+            {
+                if (_instance is not null)
+                    throw new InvalidOperationException("悠悠报价服务已创建，不能重复配置平台宿主。");
+
+                YouPinMobileApiPlatform.Configure(mobileApiHost);
+                YouPinSaleReminderPlatform.Configure(
+                    host,
+                    () => new YouPinSaleReminderService(credentialSource, httpClientFactory, host));
+            }
+        }
+
+        private readonly IYouPinCredentialSource _authService;
+        private readonly IYouPinSaleReminderHost _host;
         private readonly HttpClient _http;
         private readonly YouPinSaleReminderRemoteClient _remoteClient;
         private readonly YouPinRentalOfferConfirmationClient _rentalOfferConfirmationClient;
@@ -58,7 +89,7 @@ namespace CS2TradeMonitor.Application.YouPin
         private readonly SemaphoreSlim _sendOfferLock = new(1, 1);
         private readonly PeriodicAsyncSingleFlight _periodicCheck = new();
         private readonly object _stateLock = new();
-        private readonly string _historyPath = RuntimeDataPaths.GetDataFilePath("youpin_sale_reminder_history.json");
+        private readonly string _historyPath;
         private System.Threading.Timer? _timer;
         private Settings _settings = new();
         private YouPinSaleReminderHistory _history = new();
@@ -79,27 +110,69 @@ namespace CS2TradeMonitor.Application.YouPin
         public event Action? DataUpdated;
         public event Action<IReadOnlyList<YouPinSaleOrder>>? NewWaitDeliverOrdersDetected;
 
-        private YouPinSaleReminderService()
-            : this(YouPinServiceRuntimeServices.Resolve())
+        internal YouPinSaleReminderService(
+            IYouPinCredentialSource authService,
+            IYouPinHttpClientFactory httpFactory)
+            : this(
+                authService,
+                httpFactory,
+                YouPinSaleReminderPlatform.Host.GetDataFilePath("youpin_sale_reminder_history.json"),
+                YouPinSaleReminderPlatform.Host)
         {
         }
 
-        internal YouPinSaleReminderService(YouPinServiceRuntimeServices services)
-            : this(services.Auth, services.DomesticHttpFactory)
+        internal YouPinSaleReminderService(
+            IYouPinCredentialSource authService,
+            IYouPinHttpClientFactory httpFactory,
+            string historyPath)
+            : this(authService, httpFactory, historyPath, YouPinSaleReminderPlatform.Host)
         {
         }
 
-        internal YouPinSaleReminderService(IYouPinAuthService authService, IDomesticHttpClientFactory httpFactory)
+        internal YouPinSaleReminderService(
+            IYouPinCredentialSource authService,
+            IYouPinHttpClientFactory httpFactory,
+            IYouPinSaleReminderHost host)
+            : this(
+                authService,
+                httpFactory,
+                host.GetDataFilePath("youpin_sale_reminder_history.json"),
+                host)
+        {
+        }
+
+        internal YouPinSaleReminderService(
+            IYouPinCredentialSource authService,
+            IYouPinHttpClientFactory httpFactory,
+            string historyPath,
+            IYouPinSaleReminderHost host)
         {
             _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+            _host = host ?? throw new ArgumentNullException(nameof(host));
             _http = (httpFactory ?? throw new ArgumentNullException(nameof(httpFactory))).Create(20);
             _remoteClient = new YouPinSaleReminderRemoteClient(_http);
             _rentalOfferConfirmationClient = new YouPinRentalOfferConfirmationClient(_http);
-            _historyStore = new YouPinSaleReminderHistoryStore(_historyPath, JsonOptions);
+            _historyPath = string.IsNullOrWhiteSpace(historyPath)
+                ? throw new ArgumentException("历史记录路径不能为空。", nameof(historyPath))
+                : historyPath;
+            _historyStore = new YouPinSaleReminderHistoryStore(
+                _historyPath,
+                JsonOptions,
+                _host.WriteTextAtomic,
+                () => DateTime.Now,
+                _host.InstallDirectory,
+                _host.Info,
+                _host.Ignored);
             _history = _historyStore.Load();
         }
 
         public void Configure(Settings settings)
+            => ConfigureCore(settings, useInternalTimer: true);
+
+        public void ConfigureForExternalScheduler(Settings settings)
+            => ConfigureCore(settings, useInternalTimer: false);
+
+        private void ConfigureCore(Settings settings, bool useInternalTimer)
         {
             _settings = settings ?? new Settings();
 
@@ -125,8 +198,11 @@ namespace CS2TradeMonitor.Application.YouPin
                 return;
             }
 
-            _timer = new System.Threading.Timer(_ => _ = RunPeriodicCheckAsync(), null, 10000, 15000);
-            _ = RunPeriodicCheckAsync();
+            if (useInternalTimer)
+            {
+                _timer = new System.Threading.Timer(_ => _ = RunPeriodicCheckAsync(), null, 10000, 15000);
+                _ = RunPeriodicCheckAsync();
+            }
         }
 
         public YouPinSaleReminderState GetState()
@@ -201,10 +277,10 @@ namespace CS2TradeMonitor.Application.YouPin
 
         public string EnsureQuoteLogFile()
         {
-            return SteamOfferAuditLog.EnsureLogFile();
+            return _host.EnsureQuoteLogFile();
         }
 
-        public async Task<YouPinSaleActionResult> SendOfferAsync(string orderNo, string trigger = SteamOfferAuditLog.TriggerUserManual)
+        public async Task<YouPinSaleActionResult> SendOfferAsync(string orderNo, string trigger = "用户手动")
         {
             var result = await SendOfferActionAsync(orderNo);
             AppendQuoteActionLog("发送报价", orderNo, result, trigger);
@@ -231,7 +307,7 @@ namespace CS2TradeMonitor.Application.YouPin
                     return skipped;
 
                 await TrySendDeviceHeartbeatAsync(credential).ConfigureAwait(false);
-                await TradeWriteOperationGate.WaitAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
+                await _host.WaitForTradeWriteAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
 
                 string normalizedOrderNo = actionOrderNos[0];
                 var h5Result = await SendOfferH5ForOrdersAsync(actionOrderNos, credential);
@@ -246,7 +322,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 if (IsOrderStateCannotSend(h5Result.Message) || actionOrderNos.Count > 1)
                     return h5Result;
 
-                await TradeWriteOperationGate.WaitAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
+                await _host.WaitForTradeWriteAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
                 var legacyResult = await SendOfferLegacyAsync(normalizedOrderNo, credential);
                 if (legacyResult.Ok)
                 {
@@ -271,7 +347,7 @@ namespace CS2TradeMonitor.Application.YouPin
             }
         }
 
-        public async Task<YouPinSaleActionResult> ConfirmOfferAsync(string orderNo, string tradeOfferId = "", string trigger = SteamOfferAuditLog.TriggerUserManual)
+        public async Task<YouPinSaleActionResult> ConfirmOfferAsync(string orderNo, string tradeOfferId = "", string trigger = "用户手动")
         {
             var result = await ConfirmOfferActionAsync(orderNo, tradeOfferId);
             AppendQuoteActionLog("确认报价", orderNo, result, trigger);
@@ -294,19 +370,22 @@ namespace CS2TradeMonitor.Application.YouPin
 
                 var actionOrderNos = ResolveActionOrderNos(localOrder);
                 string normalizedOrderNo = actionOrderNos[0];
+                bool isSingleRentalOrder = localOrder.OrderType == 2 && actionOrderNos.Count == 1;
+                bool canConfirmWithoutTradeOfferId = TradeAutomationPolicy
+                    .CanConfirmPlatformWithoutTradeOfferId(isSingleRentalOrder);
                 string resolvedTradeOfferId = FirstText(tradeOfferId, localOrder.TradeOfferId);
-                if (string.IsNullOrWhiteSpace(resolvedTradeOfferId))
+                if (!canConfirmWithoutTradeOfferId && string.IsNullOrWhiteSpace(resolvedTradeOfferId))
                     resolvedTradeOfferId = await _remoteClient.TryFetchTradeOfferIdAsync(normalizedOrderNo, credential.Token, credential.DeviceToken, credential.Uk);
 
-                if (string.IsNullOrWhiteSpace(resolvedTradeOfferId))
+                if (!canConfirmWithoutTradeOfferId && string.IsNullOrWhiteSpace(resolvedTradeOfferId))
                     return YouPinSaleActionResult.Failed("缺少 Steam 报价号，请先点击“立即刷新”或在手机悠悠 APP 中确认报价。");
 
-                string processedKey = BuildProcessedActionKey(accountKey, "confirm", actionOrderNos, resolvedTradeOfferId);
+                string processedKey = BuildProcessedActionKey(accountKey, "confirm", actionOrderNos, "");
                 if (TryBuildProcessedSkip(processedKey, "确认报价", out var skipped))
                     return skipped;
 
                 await TrySendDeviceHeartbeatAsync(credential).ConfigureAwait(false);
-                await TradeWriteOperationGate.WaitAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
+                await _host.WaitForTradeWriteAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
                 var result = await ConfirmOfferCoreAsync(actionOrderNos, resolvedTradeOfferId, localOrder.OrderType, credential);
                 if (result.Ok)
                 {
@@ -328,7 +407,7 @@ namespace CS2TradeMonitor.Application.YouPin
             }
         }
 
-        public async Task<YouPinSaleActionResult> QueryOfferStatusAsync(string orderNo, string trigger = SteamOfferAuditLog.TriggerUserManual)
+        public async Task<YouPinSaleActionResult> QueryOfferStatusAsync(string orderNo, string trigger = "用户手动")
         {
             var result = await QueryOfferStatusActionAsync(orderNo);
             AppendQuoteActionLog("查询状态", orderNo, result, trigger);
@@ -578,7 +657,7 @@ namespace CS2TradeMonitor.Application.YouPin
         {
             try
             {
-                await TradeWriteOperationGate.WaitAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
+                await _host.WaitForTradeWriteAsync(BuildYouPinWriteGateKey(credential)).ConfigureAwait(false);
                 YouPinDeviceHeartbeatResult result = await _remoteClient.SendDeviceHeartbeatAsync(
                     credential.Token,
                     credential.DeviceToken,
@@ -608,7 +687,7 @@ namespace CS2TradeMonitor.Application.YouPin
         {
             int failures = Interlocked.Increment(ref _deviceHeartbeatFailures);
             string diagnostic = result.ToDiagnosticText();
-            DiagnosticsLogger.InfoThrottled(
+            _host.InfoThrottled(
                 "YouPin",
                 "device-heartbeat-" + result.Kind.ToString().ToLowerInvariant(),
                 $"悠悠有品设备心跳失败：{diagnostic}; ConsecutiveFailures={failures}",
@@ -647,28 +726,27 @@ namespace CS2TradeMonitor.Application.YouPin
             {
                 if (!_settings.DoNotDisturbEnabled)
                 {
-                    AppNotificationHub.Instance.Request(
+                    _host.ShowNotification(
                         title,
                         message,
-                        AppNotificationSeverity.Warning,
-                        AppNotificationPlacement.Desktop);
+                        warning: true);
                 }
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Ignored("YouPin", "ShowLoginExpiredToast", ex, retryable: false, category: "Notify");
+                _host.Ignored("YouPin", "ShowLoginExpiredToast", ex, retryable: false, category: "Notify");
             }
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    if (PhoneAlertDispatchService.IsConfigured(_settings))
-                        await PhoneAlertDispatchService.Instance.SendConfiguredAsync(_settings, title, message).ConfigureAwait(false);
+                    if (_host.IsPhoneAlertConfigured(_settings))
+                        await _host.SendPhoneAlertAsync(_settings, title, message).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    DiagnosticsLogger.Ignored("YouPin", "SendLoginExpiredPhoneAlert", ex, retryable: true, category: "Notify");
+                    _host.Ignored("YouPin", "SendLoginExpiredPhoneAlert", ex, retryable: true, category: "Notify");
                 }
             });
         }
@@ -1005,9 +1083,12 @@ namespace CS2TradeMonitor.Application.YouPin
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Error("YouPinSaleReminder", "周期检查失败。", ex);
+                _host.Error("YouPinSaleReminder", "周期检查失败。", ex);
             }
         }
+
+        public Task RunDueChecksAsync()
+            => _periodicCheck.TryRunAsync(CheckIfDueAsync);
 
         private async Task CheckIfDueAsync()
         {
@@ -1067,7 +1148,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 }
                 catch (Exception pendingBuyEx)
                 {
-                    DiagnosticsLogger.Info(
+                    _host.Info(
                         "YouPinQuote",
                         "Pending-buy read failed; keeping wait-deliver results. " + Sanitize(pendingBuyEx.Message));
                 }
@@ -1180,7 +1261,7 @@ namespace CS2TradeMonitor.Application.YouPin
                         }
                         catch (Exception pendingBuyEx)
                         {
-                            DiagnosticsLogger.Info(
+                            _host.Info(
                                 "YouPinQuote",
                                 "Pending-buy read failed; keeping wait-deliver results. " + Sanitize(pendingBuyEx.Message));
                         }
@@ -1191,7 +1272,7 @@ namespace CS2TradeMonitor.Application.YouPin
                             ? "已读取待发货/报价处理列表：暂无待处理订单。自动发货开关请以手机端为准，本软件不修改配置。"
                             : $"已读取待发货/报价处理列表：{waitDeliverOrders.Count} 条待处理。自动发货开关请以手机端为准，本软件不修改配置。";
                         _lastAutoDeliveryError = "";
-                        AppendQuoteLog("读取订单", true, "", "", _lastAutoDeliveryStatus, SteamOfferAuditLog.TriggerBackgroundAuto);
+                        AppendQuoteLog("读取订单", true, "", "", _lastAutoDeliveryStatus, _host.BackgroundAutoTrigger);
                     }
                     catch (Exception waitEx)
                     {
@@ -1199,7 +1280,7 @@ namespace CS2TradeMonitor.Application.YouPin
                         _lastAutoDeliveryCheck = DateTime.Now;
                         _lastAutoDeliveryStatus = "待发货/自动发货诊断读取失败";
                         _lastAutoDeliveryError = Sanitize(waitEx.Message);
-                        AppendQuoteLog("读取订单", false, "", "", _lastAutoDeliveryError, SteamOfferAuditLog.TriggerBackgroundAuto);
+                        AppendQuoteLog("读取订单", false, "", "", _lastAutoDeliveryError, _host.BackgroundAutoTrigger);
                     }
                     source = "悠悠有品待办";
                 }
@@ -1377,7 +1458,7 @@ namespace CS2TradeMonitor.Application.YouPin
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Ignored("YouPinQuote", "VerifyConfirmSubmitted", ex, retryable: true, category: "Refresh");
+                _host.Ignored("YouPinQuote", "VerifyConfirmSubmitted", ex, retryable: true, category: "Refresh");
                 return false;
             }
         }
@@ -1419,24 +1500,24 @@ namespace CS2TradeMonitor.Application.YouPin
             if (!showBubble && !playSound)
                 return;
 
-            AppNotificationHub.Instance.Request(
+            _host.ShowNotification(
                 title,
                 message,
-                AppNotificationSeverity.Info,
-                AppNotificationPlacement.Desktop,
-                playSound,
+                warning: false,
+                playSound: playSound,
                 showToast: showBubble);
         }
 
         private void RaiseDataUpdated()
         {
-            try { DataUpdated?.Invoke(); } catch (System.Exception ex) { CS2TradeMonitor.src.SystemServices.DiagnosticsLogger.Ignored(ex); }
+            try { DataUpdated?.Invoke(); }
+            catch (Exception ex) { _host.Ignored("YouPinQuote", "DataUpdated", ex, retryable: false, category: "Event"); }
         }
 
         private void RaiseNewWaitDeliverOrdersDetected(IReadOnlyList<YouPinSaleOrder> orders)
         {
             try { NewWaitDeliverOrdersDetected?.Invoke(orders); }
-            catch (Exception ex) { DiagnosticsLogger.Ignored("YouPinQuote", "NewWaitDeliverOrdersDetected", ex, retryable: true, category: "Automation"); }
+            catch (Exception ex) { _host.Ignored("YouPinQuote", "NewWaitDeliverOrdersDetected", ex, retryable: true, category: "Automation"); }
         }
 
         private void AppendQuoteActionLog(string action, string orderNo, YouPinSaleActionResult result, string trigger)
@@ -1451,8 +1532,7 @@ namespace CS2TradeMonitor.Application.YouPin
         {
             try
             {
-                SteamOfferAuditLog.LogTradeAction(
-                    SteamOfferAuditLog.SystemYouPin,
+                _host.LogTradeAction(
                     NormalizeQuoteTrigger(trigger),
                     action,
                     BuildYouPinLogResult(action, ok, message),
@@ -1462,7 +1542,7 @@ namespace CS2TradeMonitor.Application.YouPin
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Ignored("YouPinQuote", "AppendQuoteLog", ex, retryable: true, category: "Log");
+                _host.Ignored("YouPinQuote", "AppendQuoteLog", ex, retryable: true, category: "Log");
             }
         }
 
@@ -1532,18 +1612,18 @@ namespace CS2TradeMonitor.Application.YouPin
                 || text.Contains("确认", StringComparison.Ordinal);
         }
 
-        private static string NormalizeQuoteCheckTrigger(string trigger)
+        private string NormalizeQuoteCheckTrigger(string trigger)
         {
             string text = trigger ?? string.Empty;
             return text.Contains("立即", StringComparison.Ordinal)
-                ? SteamOfferAuditLog.TriggerUserCheckNow
-                : SteamOfferAuditLog.TriggerBackgroundAuto;
+                ? _host.UserCheckNowTrigger
+                : _host.BackgroundAutoTrigger;
         }
 
-        private static string NormalizeQuoteTrigger(string trigger)
+        private string NormalizeQuoteTrigger(string trigger)
         {
             if (string.IsNullOrWhiteSpace(trigger))
-                return SteamOfferAuditLog.TriggerUserManual;
+                return _host.UserManualTrigger;
 
             return trigger.Trim();
         }
@@ -1554,7 +1634,7 @@ namespace CS2TradeMonitor.Application.YouPin
             lock (_stateLock)
             {
                 RemoveMockHistory(_history);
-                PruneHistory(_history);
+                PruneHistory(_history, message => _host.Info("YouPinTodo", message));
             }
 
             _historyStore.Save(_history);

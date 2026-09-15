@@ -1,4 +1,5 @@
 using CS2TradeMonitor.Domain.Steam;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -125,7 +126,7 @@ namespace CS2TradeMonitor.Application.Steam
                     mobileConfirmationsFetched = true;
                     mobileConfirmationCount = confirmations.Count;
                     MergeMobileConfirmations(offers, confirmations);
-                    SteamOfferAuditLog.InfoThrottled(
+                    _host.InfoThrottled(
                         "steam-mobile-confirmations-count",
                         $"Steam mobile confirmations fetched. Count={mobileConfirmationCount}",
                         TimeSpan.FromMinutes(1));
@@ -137,7 +138,7 @@ namespace CS2TradeMonitor.Application.Steam
                     string confirmWarning = BuildMobileConfirmationWarning(ex);
                     string diagnosticWarning = BuildMobileConfirmationDiagnosticWarning(ex);
                     partialWarning = AppendPartialWarning(partialWarning, confirmWarning);
-                    SteamOfferAuditLog.InfoThrottled(
+                    _host.InfoThrottled(
                         "steam-mobile-confirmations-background-failure",
                         "Steam mobile confirmations unavailable in background enrichment. Reason=" + diagnosticWarning,
                         TimeSpan.FromMinutes(5));
@@ -170,9 +171,9 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                _host.InfoThrottled(
                     "steam-offer-background-enrichment-failed",
-                    "Steam offer background enrichment failed. Reason=" + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                    "Steam offer background enrichment failed. Reason=" + _host.RedactSecrets(ex.Message),
                     TimeSpan.FromMinutes(5));
             }
         }
@@ -222,7 +223,7 @@ namespace CS2TradeMonitor.Application.Steam
         private static void LogLoadStage(string stage, Stopwatch stopwatch)
         {
             stopwatch.Stop();
-            SteamOfferAuditLog.InfoThrottled(
+            SteamOfferPlatform.Host.InfoThrottled(
                 "steam-offer-load-stage:" + stage,
                 $"Steam offer load stage. Stage={stage}; ElapsedMs={stopwatch.Elapsed.TotalMilliseconds:F0}",
                 TimeSpan.FromMinutes(1));

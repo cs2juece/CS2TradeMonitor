@@ -8,6 +8,8 @@ namespace CS2TradeMonitor.src.UI
 {
     internal static class SettingsFormStateModel
     {
+        public const int CurrentWindowPlacementVersion = Settings.CurrentSettingsPanelWindowPlacementVersion;
+
         public static Size BuildWindowSize(Rectangle workingArea)
         {
             return new Size(
@@ -24,12 +26,27 @@ namespace CS2TradeMonitor.src.UI
                 Math.Min(UIUtils.S(720), heightLimit));
         }
 
-        public static Size BuildRestoredWindowSize(Rectangle workingArea, int savedWidth, int savedHeight)
+        public static Size BuildRestoredWindowSize(
+            Rectangle workingArea,
+            int savedWidth,
+            int savedHeight,
+            int placementVersion)
         {
             if (savedWidth <= 0 || savedHeight <= 0)
                 return BuildWindowSize(workingArea);
 
-            return ClampWindowSize(new Size(savedWidth, savedHeight), workingArea);
+            if (placementVersion != CurrentWindowPlacementVersion)
+                return BuildWindowSize(workingArea);
+
+            return ClampWindowSize(UIUtils.S(new Size(savedWidth, savedHeight)), workingArea);
+        }
+
+        public static Size BuildPersistedWindowSize(Size physicalSize)
+        {
+            float scale = Math.Max(0.01f, UIUtils.ScaleFactor);
+            return new Size(
+                Math.Max(1, (int)Math.Round(physicalSize.Width / scale)),
+                Math.Max(1, (int)Math.Round(physicalSize.Height / scale)));
         }
 
         public static Size ClampWindowSize(Size requested, Rectangle workingArea)
@@ -53,16 +70,52 @@ namespace CS2TradeMonitor.src.UI
                 size.Height);
         }
 
+        public static Rectangle ClampWindowBounds(Rectangle requested, Rectangle workingArea)
+        {
+            Size size = ClampWindowSize(requested.Size, workingArea);
+            int maxLeft = Math.Max(workingArea.Left, workingArea.Right - size.Width);
+            int maxTop = Math.Max(workingArea.Top, workingArea.Bottom - size.Height);
+            return new Rectangle(
+                Math.Clamp(requested.Left, workingArea.Left, maxLeft),
+                Math.Clamp(requested.Top, workingArea.Top, maxTop),
+                size.Width,
+                size.Height);
+        }
+
+        public static Rectangle ScaleNormalWindowBoundsForDpi(
+            Rectangle normalBounds,
+            Rectangle targetWorkingArea,
+            int oldDpi,
+            int newDpi)
+        {
+            if (normalBounds.Width <= 0 || normalBounds.Height <= 0 || oldDpi <= 0 || newDpi <= 0)
+                return BuildCenteredWindowBounds(targetWorkingArea, BuildWindowSize(targetWorkingArea));
+
+            double ratio = newDpi / (double)oldDpi;
+            var scaledSize = new Size(
+                Math.Max(1, (int)Math.Round(normalBounds.Width * ratio)),
+                Math.Max(1, (int)Math.Round(normalBounds.Height * ratio)));
+            return BuildCenteredWindowBounds(targetWorkingArea, scaledSize);
+        }
+
+        public static bool NeedsMaximizedBoundsRefresh(
+            bool isMaximized,
+            Rectangle currentBounds,
+            Rectangle workingArea)
+        {
+            return isMaximized && currentBounds != workingArea;
+        }
+
         public static SettingsFormSidebarLayout BuildSidebarLayout(Size sidebarSize, int lineWidth)
         {
             int normalizedLineWidth = Math.Max(1, lineWidth);
             int width = Math.Max(1, sidebarSize.Width - normalizedLineWidth);
             int height = Math.Max(1, sidebarSize.Height);
             int systemHeight = UIUtils.S(50);
-            int themeHeight = UIUtils.S(58);
+            int themeHeight = UIUtils.S(74);
             int navHeight = Math.Max(1, height - systemHeight - themeHeight);
             int switchWidth = Math.Min(width - UIUtils.S(36), UIUtils.S(204));
-            int switchHeight = UIUtils.S(36);
+            int switchHeight = UIUtils.S(44);
 
             return new SettingsFormSidebarLayout(
                 NavBounds: new Rectangle(0, 0, width, navHeight),

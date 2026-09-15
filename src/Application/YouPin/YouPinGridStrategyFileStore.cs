@@ -1,6 +1,6 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -66,7 +66,7 @@ namespace CS2TradeMonitor.Application.YouPin
             try
             {
                 string json = JsonSerializer.Serialize(state ?? new YouPinGridState(), JsonOptions);
-                RuntimeDataPaths.WriteTextAtomic(_path, json);
+                PortableAtomicFile.WriteAllText(_path, json);
                 return true;
             }
             catch (Exception ex)

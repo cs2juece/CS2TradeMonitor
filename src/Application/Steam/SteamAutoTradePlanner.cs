@@ -1,6 +1,7 @@
 using CS2TradeMonitor.Application.YouPin;
 using CS2TradeMonitor.Domain.Steam;
 using CS2TradeMonitor.Domain.YouPin;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -176,14 +177,10 @@ namespace CS2TradeMonitor.Application.Steam
             ArgumentNullException.ThrowIfNull(plan);
             ArgumentNullException.ThrowIfNull(confirmation);
 
-            if (!IsTradeConfirmation(confirmation))
-                return false;
-
-            string planTradeOfferId = (plan.TradeOfferId ?? string.Empty).Trim();
-            string confirmationTradeOfferId = (confirmation.TradeOfferId ?? string.Empty).Trim();
-            return !string.IsNullOrWhiteSpace(planTradeOfferId)
-                && !string.IsNullOrWhiteSpace(confirmationTradeOfferId)
-                && string.Equals(planTradeOfferId, confirmationTradeOfferId, StringComparison.OrdinalIgnoreCase);
+            return TradeAutomationPolicy.IsExactTradeOfferMatch(
+                plan.TradeOfferId,
+                confirmation.TradeOfferId,
+                IsTradeConfirmation(confirmation));
         }
 
         public static string FormatDirection(SteamAutoTradeDirection direction)
@@ -265,13 +262,10 @@ namespace CS2TradeMonitor.Application.Steam
             SteamAutoTradeCategory category,
             SteamAutoTradeSettings settings)
         {
-            return category switch
-            {
-                SteamAutoTradeCategory.PureIncoming => false,
-                SteamAutoTradeCategory.YouPinPurchase => settings.AcceptYouPinPurchaseEnabled,
-                SteamAutoTradeCategory.YouPinRental => settings.SendYouPinRentalEnabled,
-                _ => false
-            };
+            return TradeAutomationPolicy.CanAutoExecuteOffer(
+                MapCategory(category),
+                settings.AcceptYouPinPurchaseEnabled,
+                settings.SendYouPinRentalEnabled);
         }
 
         private static SteamAutoTradeAction GetOfferAction(SteamAutoTradeCategory category)
@@ -310,13 +304,23 @@ namespace CS2TradeMonitor.Application.Steam
         {
             if (!string.IsNullOrWhiteSpace(offer.TradeOfferId)
                 && orders.TryGetValue(offer.TradeOfferId.Trim(), out YouPinSaleOrder? byOffer))
-                return byOffer;
+            {
+                if (TradeAutomationPolicy.IsExactTradeOfferMatch(
+                    offer.TradeOfferId,
+                    byOffer.TradeOfferId,
+                    candidateIsTradeConfirmation: true))
+                {
+                    return byOffer;
+                }
+            }
 
             string orderNo = FirstText(offer.PlatformOrderNo, offer.YouPinOrderNo);
             if (!string.IsNullOrWhiteSpace(orderNo))
             {
-                return orders.Values.FirstOrDefault(x => string.Equals(x.OrderNo, orderNo, StringComparison.OrdinalIgnoreCase)
-                    || x.OrderNos.Any(order => string.Equals(order, orderNo, StringComparison.OrdinalIgnoreCase)));
+                return orders.Values.FirstOrDefault(candidate => TradeAutomationPolicy.IsExactOrderMatch(
+                    orderNo,
+                    candidate.OrderNo,
+                    candidate.OrderNos));
             }
 
             return null;
@@ -372,5 +376,18 @@ namespace CS2TradeMonitor.Application.Steam
 
             return "";
         }
+
+        private static TradeAutomationOfferCategory MapCategory(SteamAutoTradeCategory category)
+        {
+            return category switch
+            {
+                SteamAutoTradeCategory.PureIncoming => TradeAutomationOfferCategory.PureIncoming,
+                SteamAutoTradeCategory.YouPinPurchase => TradeAutomationOfferCategory.YouPinPurchase,
+                SteamAutoTradeCategory.YouPinSale => TradeAutomationOfferCategory.YouPinSale,
+                SteamAutoTradeCategory.YouPinRental => TradeAutomationOfferCategory.YouPinRental,
+                _ => TradeAutomationOfferCategory.Unknown
+            };
+        }
+
     }
 }

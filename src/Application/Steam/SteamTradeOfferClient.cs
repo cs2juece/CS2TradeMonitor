@@ -1,6 +1,4 @@
-using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.Application.Abstractions;
-using CS2TradeMonitor.Application.Market;
 using CS2TradeMonitor.Application.Steam;
 using CS2TradeMonitor.Application.Steam.Auth;
 using CS2TradeMonitor.Domain.Steam;
@@ -13,6 +11,7 @@ using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading.Tasks;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.Application.Steam
 {
@@ -22,19 +21,14 @@ namespace CS2TradeMonitor.Application.Steam
         private readonly ISteamRoutedHttpClientFactory _httpFactory;
         private readonly Func<string, string> _localItemNameResolver;
 
-        public SteamTradeOfferClient(HttpClient? http = null)
-            : this(SteamServiceRuntimeServices.ResolveRoutedHttpFactory(), http)
-        {
-        }
-
-        internal SteamTradeOfferClient(
+        public SteamTradeOfferClient(
             ISteamRoutedHttpClientFactory httpFactory,
             HttpClient? http = null,
             Func<string, string>? localItemNameResolver = null)
         {
             _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _http = http;
-            _localItemNameResolver = localItemNameResolver ?? SteamDtLocalItemNameResolver.ResolveNameByMarketHashName;
+            _localItemNameResolver = localItemNameResolver ?? SteamOfferPlatform.Host.ResolveLocalItemName;
             if (_http != null)
                 ApplyDefaultHeaders(_http);
         }
@@ -296,9 +290,9 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.InfoThrottled(
+                SteamOfferPlatform.Host.InfoThrottled(
                     "steam-web-classinfo-enrich-failed",
-                    "Steam web asset class info enrichment skipped. Reason=" + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                    "Steam web asset class info enrichment skipped. Reason=" + SteamOfferPlatform.Host.RedactSecrets(ex.Message),
                     TimeSpan.FromMinutes(5));
             }
         }
@@ -470,7 +464,7 @@ namespace CS2TradeMonitor.Application.Steam
                 if (LooksLikeAlreadyHandledTradeOffer(message))
                     return SteamTradeOfferAcceptResult.Handled("Steam 报价已被处理或失效，已跳过。");
 
-                return SteamTradeOfferAcceptResult.Failed(SteamOfferAuditLog.RedactSecrets(message));
+                return SteamTradeOfferAcceptResult.Failed(SteamOfferPlatform.Host.RedactSecrets(message));
             }
             catch (JsonException)
             {
@@ -949,7 +943,7 @@ namespace CS2TradeMonitor.Application.Steam
                     .Select(x => (x.TradeOfferId ?? "").Trim())
                     .Where(x => !string.IsNullOrWhiteSpace(x))
                     .Take(8));
-            SteamOfferAuditLog.InfoThrottled(
+            SteamOfferPlatform.Host.InfoThrottled(
                 "steam-web-tradeoffers-parse:" + page,
                 $"Steam web tradeoffers parsed. Page={page}; Sent={result.SentOffers.Count}; Received={result.ReceivedOffers.Count}; HasTradeOfferSignal={ContainsAny(html, "tradeoffer", "trade_item")}; HasEconomyItem={ContainsAny(html, "data-economy-item")}; Ids={ids}",
                 TimeSpan.FromMinutes(2));
@@ -1180,7 +1174,7 @@ namespace CS2TradeMonitor.Application.Steam
                 : IsMissingSteamIdMarker(steamId) ? "not-logged-in" : "present";
             bool hasTradeOffersSignal = HasTradeOffersPageSignal(html);
             string cleanLocation = SanitizeRedirectLocation(location);
-            SteamOfferAuditLog.InfoThrottled(
+            SteamOfferPlatform.Host.InfoThrottled(
                 "steam-web-login-page-diagnostic:" + reason,
                 $"{reason}. HttpStatus={(int)statusCode}; Location={cleanLocation}; GSteamId={marker}; HasTradeOffersSignal={hasTradeOffersSignal}",
                 TimeSpan.FromMinutes(5));
@@ -1229,7 +1223,7 @@ namespace CS2TradeMonitor.Application.Steam
 
         private static string BuildBodySummary(string body)
         {
-            string clean = SteamOfferAuditLog.RedactSecrets(body ?? "");
+            string clean = SteamOfferPlatform.Host.RedactSecrets(body ?? "");
             clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
             return clean.Length <= 180 ? clean : clean[..180] + "...";
         }

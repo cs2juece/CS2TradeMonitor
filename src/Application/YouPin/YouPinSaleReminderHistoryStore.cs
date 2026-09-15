@@ -1,5 +1,5 @@
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.IO;
 using System.Text.Json;
@@ -13,9 +13,19 @@ namespace CS2TradeMonitor.Application.YouPin
         private readonly JsonSerializerOptions _options;
         private readonly Action<string, string> _writeTextAtomic;
         private readonly Func<DateTime> _now;
+        private readonly string _fallbackDirectory;
+        private readonly Action<string, string> _info;
+        private readonly Action<string, string, Exception, bool, string> _ignored;
 
         public YouPinSaleReminderHistoryStore(string path, JsonSerializerOptions options)
-            : this(path, options, RuntimeDataPaths.WriteTextAtomic, () => DateTime.Now)
+            : this(
+                path,
+                options,
+                YouPinSaleReminderPlatform.Host.WriteTextAtomic,
+                () => DateTime.Now,
+                YouPinSaleReminderPlatform.Host.InstallDirectory,
+                YouPinSaleReminderPlatform.Host.Info,
+                YouPinSaleReminderPlatform.Host.Ignored)
         {
         }
 
@@ -24,11 +34,33 @@ namespace CS2TradeMonitor.Application.YouPin
             JsonSerializerOptions options,
             Action<string, string> writeTextAtomic,
             Func<DateTime> now)
+            : this(
+                path,
+                options,
+                writeTextAtomic,
+                now,
+                AppContext.BaseDirectory,
+                static (_, _) => { },
+                static (_, _, _, _, _) => { })
+        {
+        }
+
+        internal YouPinSaleReminderHistoryStore(
+            string path,
+            JsonSerializerOptions options,
+            Action<string, string> writeTextAtomic,
+            Func<DateTime> now,
+            string fallbackDirectory,
+            Action<string, string> info,
+            Action<string, string, Exception, bool, string> ignored)
         {
             _path = path ?? throw new ArgumentNullException(nameof(path));
             _options = options ?? throw new ArgumentNullException(nameof(options));
             _writeTextAtomic = writeTextAtomic ?? throw new ArgumentNullException(nameof(writeTextAtomic));
             _now = now ?? throw new ArgumentNullException(nameof(now));
+            _fallbackDirectory = fallbackDirectory ?? throw new ArgumentNullException(nameof(fallbackDirectory));
+            _info = info ?? throw new ArgumentNullException(nameof(info));
+            _ignored = ignored ?? throw new ArgumentNullException(nameof(ignored));
         }
 
         public bool HasPendingSave { get; private set; }
@@ -44,14 +76,14 @@ namespace CS2TradeMonitor.Application.YouPin
 
                 string json = File.ReadAllText(_path);
                 var history = JsonSerializer.Deserialize<YouPinSaleReminderHistory>(json, _options) ?? new YouPinSaleReminderHistory();
-                PruneHistory(history);
+                PruneHistory(history, message => _info("YouPinTodo", message));
                 LastError = "";
                 return history;
             }
             catch (Exception ex)
             {
                 LastError = "悠悠报价历史读取失败：" + ex.Message;
-                DiagnosticsLogger.Ignored("YouPinQuote", "LoadHistory", ex, retryable: true, category: "Storage");
+                _ignored("YouPinQuote", "LoadHistory", ex, true, "Storage");
                 BackupCorruptHistoryFile();
                 return new YouPinSaleReminderHistory();
             }
@@ -71,7 +103,7 @@ namespace CS2TradeMonitor.Application.YouPin
             {
                 HasPendingSave = true;
                 LastError = "悠悠报价历史保存失败：" + ex.Message;
-                DiagnosticsLogger.Ignored("YouPinQuote", "SaveHistory", ex, retryable: true, category: "Storage");
+                _ignored("YouPinQuote", "SaveHistory", ex, true, "Storage");
                 return false;
             }
         }
@@ -83,7 +115,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 if (!File.Exists(_path))
                     return;
 
-                string directory = Path.GetDirectoryName(_path) ?? global::CS2TradeMonitor.src.SystemServices.InstallationPaths.InstallDirectory;
+                string directory = Path.GetDirectoryName(_path) ?? _fallbackDirectory;
                 string fileName = Path.GetFileName(_path);
                 string timestamp = _now().ToString("yyyyMMdd_HHmmss");
                 string backupPath = Path.Combine(directory, fileName + ".corrupt_" + timestamp);
@@ -96,11 +128,11 @@ namespace CS2TradeMonitor.Application.YouPin
 
                 File.Move(_path, backupPath);
                 LastCorruptBackupPath = backupPath;
-                DiagnosticsLogger.Info("YouPinQuote", "已备份损坏的悠悠报价历史文件: " + backupPath);
+                _info("YouPinQuote", "已备份损坏的悠悠报价历史文件: " + backupPath);
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Ignored("YouPinQuote", "BackupCorruptHistory", ex, retryable: true, category: "Storage");
+                _ignored("YouPinQuote", "BackupCorruptHistory", ex, true, "Storage");
             }
         }
     }

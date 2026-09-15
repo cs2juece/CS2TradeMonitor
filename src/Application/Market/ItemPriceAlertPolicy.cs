@@ -1,23 +1,12 @@
 using CS2TradeMonitor.src.Core;
+using CS2TradeMonitor.Shared.Market;
 
 namespace CS2TradeMonitor.Application.Market
 {
     internal static class ItemPriceAlertPolicy
     {
         public static ItemPriceAlertTriggerMode ResolveTriggerMode(ItemMonitorConfig item)
-        {
-            ArgumentNullException.ThrowIfNull(item);
-
-            if (item.PriceAlertTriggerMode is ItemPriceAlertTriggerMode.Breakthrough
-                or ItemPriceAlertTriggerMode.Percent)
-            {
-                return item.PriceAlertTriggerMode;
-            }
-
-            return item.PriceAlertAbove > 0 || item.PriceAlertBelow > 0
-                ? ItemPriceAlertTriggerMode.Breakthrough
-                : ItemPriceAlertTriggerMode.Percent;
-        }
+            => ItemPriceAlertEvaluator.ResolveTriggerMode(item);
 
         public static bool IsDeliveryEnabled(ItemMonitorConfig item)
         {

@@ -1,5 +1,4 @@
 using CS2TradeMonitor.Application.YouPin;
-using CS2TradeMonitor.src.SystemServices;
 
 namespace CS2TradeMonitor.Application.Abstractions
 {
@@ -18,5 +17,8 @@ namespace CS2TradeMonitor.Application.Abstractions
         YouPinInventoryTrendState GetTrendState();
 
         Task<YouPinInventoryFetchResult> FetchNowAsync(bool useMock = false, CancellationToken cancellationToken = default);
+
+        Task<YouPinInventoryFetchResult> FetchIfDueAsync(CancellationToken cancellationToken = default)
+            => FetchNowAsync(useMock: false, cancellationToken);
     }
 }

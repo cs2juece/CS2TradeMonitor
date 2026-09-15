@@ -19,6 +19,8 @@ releases/
 artifacts/
 TestResults/
 coverage/
+!CS2TradeMonitor.YouPinPrivacyAudit/Coverage/
+!CS2TradeMonitor.YouPinPrivacyAudit/Coverage/**
 .cache/
 scratch/
 *.trx
@@ -62,6 +64,8 @@ runtime/
 *.tar
 *.tar.gz
 *.gz
+!CS2TradeMonitor.YouPinPrivacyAudit/Resources/hot-top1000.catalog.json.gz
+!CS2TradeMonitor.YouPinPrivacyAudit/Resources/hot-top1000.youpin-mapping.json.gz
 *.msi
 *.pkg
 *.pdb

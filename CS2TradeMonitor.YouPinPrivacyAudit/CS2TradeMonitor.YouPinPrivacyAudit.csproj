@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CS2TradeMonitor.YouPinPrivacyAudit</AssemblyName>
+    <RootNamespace>CS2TradeMonitor.YouPinPrivacyAudit</RootNamespace>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\hot-top1000.catalog.json.gz"
+                      LogicalName="CS2TradeMonitor.YouPinPrivacyAudit.Resources.hot-top1000.catalog.json.gz" />
+    <EmbeddedResource Include="Resources\hot-top1000.youpin-mapping.json.gz"
+                      LogicalName="CS2TradeMonitor.YouPinPrivacyAudit.Resources.hot-top1000.youpin-mapping.json.gz" />
+    <EmbeddedResource Include="Resources\source-plan-metadata.json"
+                      LogicalName="CS2TradeMonitor.YouPinPrivacyAudit.Resources.source-plan-metadata.json" />
+  </ItemGroup>
+</Project>

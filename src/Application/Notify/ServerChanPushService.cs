@@ -1,12 +1,13 @@
-using CS2TradeMonitor.src.SystemServices;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CS2TradeMonitor.Application.Abstractions;
+using CS2TradeMonitor.Shared.Notifications;
 
 namespace CS2TradeMonitor.Application.Notify
 {
@@ -27,21 +28,25 @@ namespace CS2TradeMonitor.Application.Notify
         public const string HelpUrl = NotificationProviderUrls.ServerChanLogin;
 
         private static readonly Regex ServerChan3KeyRegex = new(@"^sctp(\d+)t", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Lazy<ServerChanPushService> LazyInstance = new(() => new ServerChanPushService());
+        private static readonly Lazy<ServerChanPushService> LazyInstance = new(NotificationCorePlatform.CreateServerChan);
         public static ServerChanPushService Instance => LazyInstance.Value;
 
         private readonly HttpClient _httpClient;
+        private readonly INotificationCoreHost _host;
 
-        private ServerChanPushService()
-            : this(NotifyRuntimeServices.ResolveDomesticHttpFactory())
+        internal ServerChanPushService(IDomesticHttpClientFactory httpFactory)
+            : this(httpFactory, NoopNotificationCoreHost.Instance)
         {
         }
 
-        internal ServerChanPushService(IDomesticHttpClientFactory httpFactory)
+        internal ServerChanPushService(
+            IDomesticHttpClientFactory httpFactory,
+            INotificationCoreHost host)
         {
             if (httpFactory == null) throw new ArgumentNullException(nameof(httpFactory));
 
             _httpClient = httpFactory.Create(10);
+            _host = host ?? throw new ArgumentNullException(nameof(host));
         }
 
         public static bool IsConfigured(Settings? cfg)
@@ -238,10 +243,16 @@ namespace CS2TradeMonitor.Application.Notify
             return "";
         }
 
-        private static void LogFailure(string reason)
+        private void LogFailure(string reason)
         {
-            DiagnosticsLogger.Error("ServerChan", "ServerChan send failed: " + DiagnosticsLogger.Redact(reason));
+            _host.Error("ServerChan", "send-failed:" + NormalizeDiagnosticCode(reason));
         }
+
+        private static string NormalizeDiagnosticCode(string reason)
+            => string.Concat((reason ?? string.Empty)
+                .Where(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or ' '))
+                .Trim()
+                .Replace(' ', '-');
 
         private readonly record struct ApiParseResult(bool Success, int? Code, string Message);
     }

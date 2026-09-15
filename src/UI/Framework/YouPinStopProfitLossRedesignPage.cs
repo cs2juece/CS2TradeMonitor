@@ -493,24 +493,19 @@ namespace CS2TradeMonitor.src.UI.Framework
             panel.Controls.Add(scanButton);
             panel.Layout += (_, __) =>
             {
-                int gap = UIUtils.S(12);
-                int buttonWidth = UIUtils.S(128);
-                int tileWidth = Math.Max(UIUtils.S(150), (panel.ClientSize.Width - panel.Padding.Horizontal - buttonWidth - gap * 4) / 4);
-                int top = panel.Padding.Top;
-                int height = panel.ClientSize.Height - panel.Padding.Vertical;
-                int x = panel.Padding.Left;
-                enabledTile.SetBounds(x, top, tileWidth, height);
-                x += tileWidth + gap;
-                stateTile.SetBounds(x, top, tileWidth, height);
-                x += tileWidth + gap;
-                scanTile.SetBounds(x, top, tileWidth, height);
-                x += tileWidth + gap;
-                alertTile.SetBounds(x, top, tileWidth, height);
-                scanButton.SetBounds(
-                    panel.ClientSize.Width - panel.Padding.Right - buttonWidth,
-                    top + (height - scanButton.Height) / 2,
-                    buttonWidth,
+                var contentBounds = new Rectangle(
+                    panel.Padding.Left,
+                    panel.Padding.Top,
+                    Math.Max(1, panel.ClientSize.Width - panel.Padding.Horizontal),
+                    Math.Max(1, panel.ClientSize.Height - panel.Padding.Vertical));
+                YouPinStopProfitLossStatusPanelLayout layout = YouPinStopProfitLossPageModel.BuildStatusPanelLayout(
+                    contentBounds,
                     scanButton.Height);
+                enabledTile.Bounds = layout.EnabledTileBounds;
+                stateTile.Bounds = layout.StateTileBounds;
+                scanTile.Bounds = layout.ScanTileBounds;
+                alertTile.Bounds = layout.AlertTileBounds;
+                scanButton.Bounds = layout.ScanButtonBounds;
             };
 
             return panel;

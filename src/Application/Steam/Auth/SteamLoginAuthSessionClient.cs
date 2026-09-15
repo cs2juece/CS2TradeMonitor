@@ -10,7 +10,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 using static CS2TradeMonitor.Application.Steam.Auth.SteamLoginCryptoSupport;
 using static CS2TradeMonitor.Application.Steam.Auth.SteamLoginHttpDiagnostics;
 
@@ -199,7 +199,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             if (!response.IsSuccessStatusCode)
             {
                 string summary = SanitizeResponseSummary(text);
-                SteamOfferAuditLog.Error($"Steam API returned HTTP error. Step=GenerateAccessTokenForApp; Host=api.steampowered.com; Status={(int)response.StatusCode}; Body={summary}");
+                SteamOfferPlatform.Host.Error($"Steam API returned HTTP error. Step=GenerateAccessTokenForApp; Host=api.steampowered.com; Status={(int)response.StatusCode}; Body={summary}");
                 throw new SteamLoginException(SteamLoginFailureCategory.NetworkError, $"Steam 登录接口 GenerateAccessTokenForApp 返回 HTTP {(int)response.StatusCode}。请稍后重试。");
             }
 
@@ -216,7 +216,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             }
             catch (JsonException ex)
             {
-                SteamOfferAuditLog.Error("Steam GenerateAccessTokenForApp JSON parse failed.", ex);
+                SteamOfferPlatform.Host.Error("Steam GenerateAccessTokenForApp JSON parse failed.", ex);
                 throw new SteamLoginException(SteamLoginFailureCategory.ProtocolChanged, "Steam 续期接口返回无法解析。");
             }
 
@@ -263,7 +263,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
                 using var response = await SendWithDiagnosticsAsync(http, request, "QueryTime", cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
-                    SteamOfferAuditLog.InfoThrottled(
+                    SteamOfferPlatform.Host.InfoThrottled(
                         "steam-login-querytime-http",
                         $"Steam QueryTime returned HTTP {(int)response.StatusCode}; using local system time.",
                         TimeSpan.FromMinutes(10));
@@ -285,9 +285,9 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             catch (Exception ex)
             {
                 // Keep login usable if Steam's time endpoint is unavailable; the caller still gets normal 2FA diagnostics.
-                SteamOfferAuditLog.InfoThrottled(
+                SteamOfferPlatform.Host.InfoThrottled(
                     "steam-login-querytime-unavailable",
-                    "Steam QueryTime unavailable; using local system time. " + SteamOfferAuditLog.RedactSecrets(ex.Message),
+                    "Steam QueryTime unavailable; using local system time. " + SteamOfferPlatform.Host.RedactSecrets(ex.Message),
                     TimeSpan.FromMinutes(10));
             }
 
@@ -305,7 +305,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
 
         internal static SteamLoginException ClassifyEResult(int eresult, string errorMessage)
         {
-            string suffix = string.IsNullOrWhiteSpace(errorMessage) ? "" : " " + DiagnosticsLogger.Redact(errorMessage);
+            string suffix = string.IsNullOrWhiteSpace(errorMessage) ? "" : " " + SteamOfferPlatform.Host.RedactSecrets(errorMessage);
             return eresult switch
             {
                 5 => new SteamLoginException(SteamLoginFailureCategory.InvalidPassword, "Steam 账号名或密码错误，已停止重试。" + suffix),
@@ -365,7 +365,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
                 if (!response.IsSuccessStatusCode)
                 {
                     string summary = SanitizeResponseSummary(Encoding.UTF8.GetString(bytes, 0, Math.Min(bytes.Length, 512)));
-                    SteamOfferAuditLog.Error($"Steam API returned HTTP error. Step={apiMethod}; Host=api.steampowered.com; Status={(int)response.StatusCode}; Body={summary}");
+                    SteamOfferPlatform.Host.Error($"Steam API returned HTTP error. Step={apiMethod}; Host=api.steampowered.com; Status={(int)response.StatusCode}; Body={summary}");
                     throw new SteamLoginException(SteamLoginFailureCategory.NetworkError, $"Steam 登录接口 {apiMethod} 返回 HTTP {(int)response.StatusCode}。请稍后重试。");
                 }
                 if (bytes.Length > 0 && bytes[0] == (byte)'{')

@@ -222,6 +222,13 @@ public sealed record StrategyDefinition(
     string? SourceStrategyId = null,
     IReadOnlyList<IndicatorSelection>? Indicators = null);
 
+public sealed record StrategyConditionPreset(
+    string Id,
+    string Name,
+    string Description,
+    StrategyCondition Condition,
+    IndicatorSelection Indicator);
+
 public sealed record ResearchCostInputs(
     double? PlatformFeeRate = null,
     double? SpreadBps = null,

@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using CS2TradeMonitor.src.Core.Refresh;
 using CS2TradeMonitor.src.Core.State;
 using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Core;
 
 namespace CS2TradeMonitor.src.Core
 {
@@ -39,8 +40,8 @@ namespace CS2TradeMonitor.src.Core
 
     public static class MarketDataSourceManager
     {
-        public const string QaqId = "CSQAQ";
-        public const string SteamDtId = "STEAMDT";
+        public const string QaqId = MarketDataSourceIds.Qaq;
+        public const string SteamDtId = MarketDataSourceIds.SteamDt;
         public const string QaqDisplayKey = "CSQAQ.Display";
         public const string SteamDtDisplayKey = "STEAMDT.Display";
 

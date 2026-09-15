@@ -1,6 +1,6 @@
-using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Domain.YouPin;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Globalization;
 using System.IO;
@@ -38,9 +38,63 @@ namespace CS2TradeMonitor.Application.YouPin
         };
 
         private static YouPinAuthService? _instance;
-        public static YouPinAuthService Instance => _instance ??= new YouPinAuthService();
+        private static readonly object InstanceGate = new();
+
+        public static YouPinAuthService Instance
+        {
+            get
+            {
+                lock (InstanceGate)
+                {
+                    return _instance ??= YouPinAuthPlatform.CreateService();
+                }
+            }
+        }
+
+        public static void ConfigurePlatform(
+            IYouPinHttpClientFactory httpClientFactory,
+            IYouPinAuthHost authHost,
+            IYouPinMobileApiHost mobileApiHost)
+        {
+            ArgumentNullException.ThrowIfNull(httpClientFactory);
+            ArgumentNullException.ThrowIfNull(authHost);
+            ArgumentNullException.ThrowIfNull(mobileApiHost);
+
+            lock (InstanceGate)
+            {
+                if (_instance is not null)
+                    throw new InvalidOperationException("悠悠登录服务已创建，不能重复配置平台宿主。");
+
+                YouPinMobileApiPlatform.Configure(mobileApiHost);
+                YouPinAuthPlatform.Configure(
+                    authHost,
+                    () => new YouPinAuthService(
+                        httpClientFactory,
+                        authHost.GetSecureCredentialLocation("youpin_auth.dat"),
+                        authHost));
+            }
+        }
+
+        public static YouPinAuthService Create(
+            IYouPinHttpClientFactory httpClientFactory,
+            IYouPinAuthHost authHost,
+            IYouPinMobileApiHost mobileApiHost,
+            string? credentialLocation = null)
+        {
+            ArgumentNullException.ThrowIfNull(httpClientFactory);
+            ArgumentNullException.ThrowIfNull(authHost);
+            ArgumentNullException.ThrowIfNull(mobileApiHost);
+            YouPinMobileApiPlatform.Configure(mobileApiHost);
+            return new YouPinAuthService(
+                httpClientFactory,
+                string.IsNullOrWhiteSpace(credentialLocation)
+                    ? authHost.GetSecureCredentialLocation("youpin_auth.dat")
+                    : credentialLocation,
+                authHost);
+        }
 
         private readonly HttpClient _http;
+        private readonly IYouPinAuthHost _host;
         private readonly object _fileLock = new();
         private readonly string _credentialPath;
         private string _lastStatus = "未登录";
@@ -50,21 +104,28 @@ namespace CS2TradeMonitor.Application.YouPin
         private YouPinCredential? _credentialCache;
         private bool _credentialWriteBlocked;
 
-        private YouPinAuthService()
-            : this(YouPinServiceRuntimeServices.ResolveDomesticHttpFactory())
+        internal YouPinAuthService(IYouPinHttpClientFactory httpFactory)
+            : this(
+                httpFactory,
+                YouPinAuthPlatform.Host.GetSecureCredentialLocation("youpin_auth.dat"),
+                YouPinAuthPlatform.Host)
         {
         }
 
-        internal YouPinAuthService(IDomesticHttpClientFactory httpFactory)
-            : this(httpFactory, RuntimeDataPaths.GetSecureFilePath("youpin_auth.dat"))
+        internal YouPinAuthService(IYouPinHttpClientFactory httpFactory, string credentialPath)
+            : this(httpFactory, credentialPath, YouPinAuthPlatform.Host)
         {
         }
 
-        internal YouPinAuthService(IDomesticHttpClientFactory httpFactory, string credentialPath)
+        internal YouPinAuthService(
+            IYouPinHttpClientFactory httpFactory,
+            string credentialPath,
+            IYouPinAuthHost host)
         {
             _http = (httpFactory ?? throw new ArgumentNullException(nameof(httpFactory))).Create(20, new Uri(BaseUrl));
+            _host = host ?? throw new ArgumentNullException(nameof(host));
             ArgumentException.ThrowIfNullOrWhiteSpace(credentialPath);
-            _credentialPath = Path.GetFullPath(credentialPath);
+            _credentialPath = credentialPath;
         }
 
         public YouPinCredential? GetCredential(Settings? settings = null)
@@ -91,7 +152,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 try
                 {
                     // 兼容旧版本手动填写凭据：调用方未传 settings 时只能从持久化配置兜底读取。
-                    legacyToken = Settings.Load().YouPinInventoryToken;
+                    legacyToken = _host.LoadSettings().YouPinInventoryToken;
                 }
                 catch
                 {
@@ -107,7 +168,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 try
                 {
                     // 兼容旧版本设备标识：调用方未传 settings 时只能从持久化配置兜底读取。
-                    legacyDevice = Settings.Load().YouPinInventoryDeviceToken;
+                    legacyDevice = _host.LoadSettings().YouPinInventoryDeviceToken;
                 }
                 catch
                 {
@@ -305,14 +366,14 @@ namespace CS2TradeMonitor.Application.YouPin
             {
                 try
                 {
-                    if (_credentialWriteBlocked && File.Exists(_credentialPath))
+                    if (_credentialWriteBlocked && _host.CredentialExists(_credentialPath))
                     {
                         _lastError = "加密凭据不可用，已保留原文件，不能自动清除。";
                         return;
                     }
 
-                    if (File.Exists(_credentialPath))
-                        File.Delete(_credentialPath);
+                    if (_host.CredentialExists(_credentialPath))
+                        _host.DeleteCredential(_credentialPath);
                     _credentialCacheInitialized = true;
                     _credentialCacheWriteUtc = DateTime.MinValue;
                     _credentialCache = null;
@@ -334,10 +395,10 @@ namespace CS2TradeMonitor.Application.YouPin
                 try
                 {
                     // 清理旧明文配置必须强制读最新磁盘配置，避免只清掉内存副本。
-                    var persisted = Settings.Load(forceReload: true);
+                    var persisted = _host.LoadSettings(forceReload: true);
                     persisted.YouPinInventoryToken = "";
                     persisted.YouPinInventoryDeviceToken = "";
-                    persisted.Save();
+                    _host.SaveSettings(persisted);
                 }
                 catch
                 {
@@ -382,7 +443,7 @@ namespace CS2TradeMonitor.Application.YouPin
             return stable;
         }
 
-        private static void PersistLegacyDeviceToken(string deviceToken, Settings? settings, bool replaceLegacy = false)
+        private void PersistLegacyDeviceToken(string deviceToken, Settings? settings, bool replaceLegacy = false)
         {
             if (string.IsNullOrWhiteSpace(deviceToken))
                 return;
@@ -392,27 +453,27 @@ namespace CS2TradeMonitor.Application.YouPin
                 if (settings != null && ShouldPersistDeviceToken(settings.YouPinInventoryDeviceToken, replaceLegacy))
                 {
                     settings.YouPinInventoryDeviceToken = deviceToken.Trim();
-                    settings.Save();
+                    _host.SaveSettings(settings);
                 }
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Ignored("YouPin", "PersistRuntimeDeviceToken", ex, retryable: true, category: "DeviceFingerprint");
+                _host.Ignored("YouPin", "PersistRuntimeDeviceToken", ex, retryable: true, category: "DeviceFingerprint");
             }
 
             try
             {
                 // 设备指纹需要落盘兼容旧配置，强制重载可避免覆盖用户刚保存的其他设置。
-                var persisted = Settings.Load(forceReload: true);
+                var persisted = _host.LoadSettings(forceReload: true);
                 if (ShouldPersistDeviceToken(persisted.YouPinInventoryDeviceToken, replaceLegacy))
                 {
                     persisted.YouPinInventoryDeviceToken = deviceToken.Trim();
-                    persisted.Save();
+                    _host.SaveSettings(persisted);
                 }
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Ignored("YouPin", "PersistSettingsDeviceToken", ex, retryable: true, category: "DeviceFingerprint");
+                _host.Ignored("YouPin", "PersistSettingsDeviceToken", ex, retryable: true, category: "DeviceFingerprint");
             }
         }
 
@@ -496,7 +557,7 @@ namespace CS2TradeMonitor.Application.YouPin
             {
                 try
                 {
-                    if (!File.Exists(_credentialPath))
+                    if (!_host.CredentialExists(_credentialPath))
                     {
                         _credentialCacheInitialized = true;
                         _credentialCacheWriteUtc = DateTime.MinValue;
@@ -505,16 +566,16 @@ namespace CS2TradeMonitor.Application.YouPin
                         return null;
                     }
 
-                    var writeUtc = File.GetLastWriteTimeUtc(_credentialPath);
+                    var writeUtc = _host.GetCredentialLastWriteTimeUtc(_credentialPath);
                     if (_credentialCacheInitialized && writeUtc == _credentialCacheWriteUtc)
                         return CloneCredential(_credentialCache);
 
-                    string text = File.ReadAllText(_credentialPath).Trim();
+                    string text = _host.ReadCredentialText(_credentialPath).Trim();
                     if (string.IsNullOrWhiteSpace(text))
                         throw new InvalidDataException("悠悠加密凭据内容为空。");
 
                     byte[] protectedBytes = Convert.FromBase64String(text);
-                    byte[] plain = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
+                    byte[] plain = _host.UnprotectCredential(protectedBytes, Entropy);
                     var credential = JsonSerializer.Deserialize<YouPinCredential>(Encoding.UTF8.GetString(plain), JsonOptions);
                     if (credential == null || string.IsNullOrWhiteSpace(credential.Token))
                         throw new InvalidDataException("悠悠加密凭据结构无效。");
@@ -542,19 +603,19 @@ namespace CS2TradeMonitor.Application.YouPin
         {
             lock (_fileLock)
             {
-                if (!_credentialCacheInitialized && File.Exists(_credentialPath))
+                if (!_credentialCacheInitialized && _host.CredentialExists(_credentialPath))
                     _ = LoadStoredCredential();
-                if (_credentialWriteBlocked && File.Exists(_credentialPath))
+                if (_credentialWriteBlocked && _host.CredentialExists(_credentialPath))
                     throw new InvalidOperationException(
                         string.IsNullOrWhiteSpace(_lastError)
                             ? "悠悠加密凭据不可用，已保留原文件。"
                             : _lastError + " 原文件已保留，不能覆盖。");
 
                 var json = JsonSerializer.Serialize(credential, JsonOptions);
-                byte[] protectedBytes = ProtectedData.Protect(Encoding.UTF8.GetBytes(json), Entropy, DataProtectionScope.CurrentUser);
-                RuntimeDataPaths.WriteTextAtomic(_credentialPath, Convert.ToBase64String(protectedBytes));
+                byte[] protectedBytes = _host.ProtectCredential(Encoding.UTF8.GetBytes(json), Entropy);
+                _host.WriteCredentialTextAtomic(_credentialPath, Convert.ToBase64String(protectedBytes));
                 _credentialCacheInitialized = true;
-                _credentialCacheWriteUtc = File.GetLastWriteTimeUtc(_credentialPath);
+                _credentialCacheWriteUtc = _host.GetCredentialLastWriteTimeUtc(_credentialPath);
                 _credentialCache = CloneCredential(credential);
                 _credentialWriteBlocked = false;
             }

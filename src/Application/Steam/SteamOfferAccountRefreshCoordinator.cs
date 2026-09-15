@@ -1,6 +1,7 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Steam.Auth;
 using CS2TradeMonitor.Domain.Steam;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Threading.Tasks;
 
@@ -79,7 +80,7 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (SteamLoginException ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = SteamOfferPlatform.Host.RedactSecrets(ex.Message);
                 if (ex.Category == SteamLoginFailureCategory.AuthExpired)
                 {
                     _apiKeyRefreshGate.SetCooldown(TimeSpan.FromMinutes(30), "Steam 返回登录页或登录状态未确认");
@@ -103,9 +104,9 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                string error = SteamOfferAuditLog.RedactSecrets(ex.Message);
+                string error = SteamOfferPlatform.Host.RedactSecrets(ex.Message);
                 _apiKeyRefreshGate.SetCooldown(TimeSpan.FromMinutes(5), "Steam Web API Key 获取失败");
-                SteamOfferAuditLog.InfoThrottled(
+                SteamOfferPlatform.Host.InfoThrottled(
                     "steam-api-key-refresh-failed",
                     "Steam Web API key refresh failed: " + error,
                     TimeSpan.FromMinutes(10));

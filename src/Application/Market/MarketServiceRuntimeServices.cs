@@ -6,12 +6,16 @@ namespace CS2TradeMonitor.Application.Market
 {
     internal sealed class MarketServiceRuntimeServices
     {
-        private MarketServiceRuntimeServices(IDomesticHttpClientFactory domesticHttpFactory)
+        private MarketServiceRuntimeServices(
+            IDomesticHttpClientFactory domesticHttpFactory,
+            CsqaqRequestRateLimiter csqaqRateLimiter)
         {
             DomesticHttpFactory = domesticHttpFactory ?? throw new ArgumentNullException(nameof(domesticHttpFactory));
+            CsqaqRateLimiter = csqaqRateLimiter ?? throw new ArgumentNullException(nameof(csqaqRateLimiter));
         }
 
         public IDomesticHttpClientFactory DomesticHttpFactory { get; }
+        public CsqaqRequestRateLimiter CsqaqRateLimiter { get; }
 
         public static MarketServiceRuntimeServices Resolve()
         {
@@ -22,7 +26,9 @@ namespace CS2TradeMonitor.Application.Market
         {
             ArgumentNullException.ThrowIfNull(provider);
 
-            return new MarketServiceRuntimeServices(provider.GetRequiredService<IDomesticHttpClientFactory>());
+            return new MarketServiceRuntimeServices(
+                provider.GetRequiredService<IDomesticHttpClientFactory>(),
+                provider.GetRequiredService<CsqaqRequestRateLimiter>());
         }
     }
 }

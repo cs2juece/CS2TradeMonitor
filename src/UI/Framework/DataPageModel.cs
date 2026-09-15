@@ -56,7 +56,10 @@ namespace CS2TradeMonitor.src.UI.Framework
 
             int interval = NormalizeMarketRefreshValue(snapshot.RefreshIntervalSeconds);
             string normalizedError = AppActions.SanitizeError(snapshot.LastError);
-            string nextStep = $"点击顶部“立即刷新”，仍失败再检查 {snapshot.CredentialName}";
+            string nextStep = snapshot.Id == MarketDataSourceManager.QaqId
+                && normalizedError.Contains("HTTP 5", StringComparison.OrdinalIgnoreCase)
+                ? "等待 QAQ 服务恢复，程序会自动重试"
+                : $"点击顶部“立即刷新”，仍失败再检查 {snapshot.CredentialName}";
             if (!snapshot.HasData)
             {
                 bool hasError = !string.IsNullOrWhiteSpace(normalizedError);

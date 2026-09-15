@@ -1,7 +1,6 @@
 using CS2TradeMonitor.Application.Steam;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 using System;
-using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,33 +9,18 @@ namespace CS2TradeMonitor.Application
 {
     internal static class TradeWriteOperationGate
     {
-        public static readonly TimeSpan DefaultMinimumInterval = TimeSpan.FromMilliseconds(1800);
-        public static readonly TimeSpan DefaultRetryDelay = TimeSpan.FromSeconds(5);
-        public const int DefaultMaxAttempts = 3;
+        public static readonly TimeSpan DefaultMinimumInterval = TradeAutomationPolicy.MinimumWriteInterval;
+        public static readonly TimeSpan DefaultRetryDelay = TradeAutomationPolicy.TransientRetryDelay;
+        public const int DefaultMaxAttempts = TradeAutomationPolicy.MaximumWriteAttempts;
 
-        private static readonly ConcurrentDictionary<string, GateState> Gates = new(StringComparer.OrdinalIgnoreCase);
+        private static TradeWriteCoordinator _coordinator = new();
 
         public static async Task WaitAsync(
             string key,
             CancellationToken cancellationToken = default,
             TimeSpan? minimumInterval = null)
         {
-            var gate = Gates.GetOrAdd(NormalizeKey(key), _ => new GateState());
-            await gate.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                TimeSpan interval = minimumInterval ?? DefaultMinimumInterval;
-                DateTime now = DateTime.UtcNow;
-                TimeSpan wait = (gate.LastGrantUtc + interval) - now;
-                if (wait > TimeSpan.Zero)
-                    await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
-
-                gate.LastGrantUtc = DateTime.UtcNow;
-            }
-            finally
-            {
-                gate.Semaphore.Release();
-            }
+            await _coordinator.WaitAsync(key, cancellationToken, minimumInterval).ConfigureAwait(false);
         }
 
         public static async Task<T> RunWithRetryAsync<T>(
@@ -49,30 +33,22 @@ namespace CS2TradeMonitor.Application
             TimeSpan? retryDelay = null,
             TimeSpan? minimumInterval = null)
         {
-            if (operation == null) throw new ArgumentNullException(nameof(operation));
-            if (isRetryable == null) throw new ArgumentNullException(nameof(isRetryable));
-
-            maxAttempts = Math.Max(1, maxAttempts);
-            for (int attempt = 1; attempt <= maxAttempts; attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await WaitAsync(key, cancellationToken, minimumInterval).ConfigureAwait(false);
-                try
+            return await _coordinator.RunWithRetryAsync(
+                key,
+                operation,
+                isRetryable,
+                retrying: context =>
                 {
-                    return await operation().ConfigureAwait(false);
-                }
-                catch (Exception ex) when (attempt < maxAttempts && isRetryable(ex))
-                {
-                    DiagnosticsLogger.InfoThrottled(
-                        "TradeWrite",
+                    SteamOfferPlatform.Host.InfoThrottled(
                         NormalizeKey(key) + ":" + operationName + ":retry",
-                        $"{operationName} 遇到临时错误，准备第 {attempt + 1}/{maxAttempts} 次重试：{DiagnosticsLogger.Redact(ex.Message)}",
+                        $"{operationName} 遇到临时错误，准备第 {context.NextAttempt}/{context.MaximumAttempts} 次重试：{SteamOfferPlatform.Host.RedactSecrets(context.Exception.Message)}",
                         TimeSpan.FromMinutes(1));
-                    await Task.Delay(retryDelay ?? DefaultRetryDelay, cancellationToken).ConfigureAwait(false);
-                }
-            }
-
-            throw new InvalidOperationException("写操作重试流程异常结束。");
+                    return ValueTask.CompletedTask;
+                },
+                cancellationToken,
+                maxAttempts,
+                retryDelay,
+                minimumInterval).ConfigureAwait(false);
         }
 
         public static bool IsRetryableTransient(Exception ex)
@@ -85,19 +61,12 @@ namespace CS2TradeMonitor.Application
 
         internal static void ResetForTests()
         {
-            Gates.Clear();
+            _coordinator = new TradeWriteCoordinator();
         }
 
         private static string NormalizeKey(string key)
         {
-            string value = (key ?? "").Trim();
-            return string.IsNullOrWhiteSpace(value) ? "global" : value;
-        }
-
-        private sealed class GateState
-        {
-            public readonly SemaphoreSlim Semaphore = new(1, 1);
-            public DateTime LastGrantUtc = DateTime.MinValue;
+            return TradeWriteCoordinator.NormalizeKey(key);
         }
     }
 }

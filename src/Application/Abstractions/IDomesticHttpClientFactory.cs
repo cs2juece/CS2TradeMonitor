@@ -1,8 +1,9 @@
 using System.Net;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.Application.Abstractions
 {
-    public interface IDomesticHttpClientFactory
+    public interface IDomesticHttpClientFactory : IYouPinHttpClientFactory
     {
         HttpClient Create(
             int timeoutSeconds = 20,
@@ -11,5 +12,8 @@ namespace CS2TradeMonitor.Application.Abstractions
                 DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             bool useCookies = true,
             bool allowAutoRedirect = true);
+
+        HttpClient IYouPinHttpClientFactory.Create(int timeoutSeconds)
+            => Create(timeoutSeconds);
     }
 }

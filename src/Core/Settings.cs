@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Drawing;
 using System.Text.Json.Serialization;
-using CS2TradeMonitor.src.Core;
+using CS2TradeMonitor.Shared.Core;
 namespace CS2TradeMonitor
 {
     public class Settings
     {
         public const int DefaultMarketRefreshSec = 500;
+        public const int CurrentSettingsPanelWindowPlacementVersion = 1;
 
         // ====== 基础设置 ======
         public string Skin { get; set; } = "DarkFlat_Classic";
@@ -34,6 +35,13 @@ namespace CS2TradeMonitor
         // ====== CSQAQ 市场监控 ======
         public int CsqaqRefreshSec { get; set; } = DefaultMarketRefreshSec;
         public string CsqaqApiToken { get; set; } = "";
+
+        // ====== 本机库存监控 ======
+        public bool LocalInventoryMonitorEnabled { get; set; } = false;
+        public int LocalInventoryRefreshMinutes { get; set; } = 5;
+        public int LocalInventoryMinimumChangeCount { get; set; } = 1;
+        public bool LocalInventoryPhoneAlertEnabled { get; set; } = false;
+        public string LocalInventoryWatchList { get; set; } = "";
 
         // ====== 界面与行为 ======
         public bool HorizontalMode { get; set; } = false;
@@ -81,6 +89,7 @@ namespace CS2TradeMonitor
         public bool SettingsPanelDarkMode { get; set; } = true;
         public int SettingsPanelWindowWidth { get; set; } = 0;
         public int SettingsPanelWindowHeight { get; set; } = 0;
+        public int SettingsPanelWindowPlacementVersion { get; set; } = 0;
         public bool SettingsPanelWindowMaximized { get; set; } = false;
 
         // ★★★ 任务栏：预设模式选择 (1=粗字模式, 0=细字模式) ★★★
@@ -263,7 +272,7 @@ namespace CS2TradeMonitor
         public string YouPinLandlordZeroCdSelectedItemNames { get; set; } = "";
         public bool YouPinLandlordZeroCdWeeklyFreeEnabled { get; set; } = false;
         public decimal YouPinLandlordZeroCdWeeklyFreeMinimumValue { get; set; } = 0m;
-        public decimal YouPinLandlordZeroCdWeeklyFreeMaximumValue { get; set; } = 0m;
+        public decimal YouPinLandlordZeroCdWeeklyFreeMaximumValue { get; set; } = 1500m;
         public bool YouPinLandlordZeroCdCooldownEnabled { get; set; } = false;
         public int YouPinLandlordZeroCdCooldownStartMinute { get; set; } = 0;
         public int YouPinLandlordZeroCdCooldownEndMinute { get; set; } = 480;
@@ -278,7 +287,7 @@ namespace CS2TradeMonitor
         public string YouPinLandlordInventoryRentalSelectedItemNames { get; set; } = "";
         public bool YouPinLandlordInventoryRentalWeeklyFreeEnabled { get; set; } = false;
         public decimal YouPinLandlordInventoryRentalWeeklyFreeMinimumValue { get; set; } = 0m;
-        public decimal YouPinLandlordInventoryRentalWeeklyFreeMaximumValue { get; set; } = 0m;
+        public decimal YouPinLandlordInventoryRentalWeeklyFreeMaximumValue { get; set; } = 1500m;
         public bool YouPinLandlordInventoryRentalCooldownEnabled { get; set; } = false;
         public int YouPinLandlordInventoryRentalCooldownStartMinute { get; set; } = 0;
         public int YouPinLandlordInventoryRentalCooldownEndMinute { get; set; } = 480;
@@ -294,7 +303,7 @@ namespace CS2TradeMonitor
         public string YouPinLandlordUnifiedSelectedItemNames { get; set; } = "";
         public bool YouPinLandlordUnifiedWeeklyFreeEnabled { get; set; } = false;
         public decimal YouPinLandlordUnifiedWeeklyFreeMinimumValue { get; set; } = 0m;
-        public decimal YouPinLandlordUnifiedWeeklyFreeMaximumValue { get; set; } = 0m;
+        public decimal YouPinLandlordUnifiedWeeklyFreeMaximumValue { get; set; } = 1500m;
         public bool YouPinLandlordUnifiedCooldownEnabled { get; set; } = false;
         public int YouPinLandlordUnifiedCooldownStartMinute { get; set; } = 0;
         public int YouPinLandlordUnifiedCooldownEndMinute { get; set; } = 480;
@@ -308,7 +317,7 @@ namespace CS2TradeMonitor
         public string YouPinLandlordInventoryAutoRentSelectedItemNames { get; set; } = "";
         public bool YouPinLandlordInventoryAutoRentWeeklyFreeEnabled { get; set; } = false;
         public decimal YouPinLandlordInventoryAutoRentWeeklyFreeMinimumValue { get; set; } = 0m;
-        public decimal YouPinLandlordInventoryAutoRentWeeklyFreeMaximumValue { get; set; } = 0m;
+        public decimal YouPinLandlordInventoryAutoRentWeeklyFreeMaximumValue { get; set; } = 1500m;
         public bool YouPinLandlordInventoryAutoRentCooldownEnabled { get; set; } = false;
         public int YouPinLandlordInventoryAutoRentCooldownStartMinute { get; set; } = 0;
         public int YouPinLandlordInventoryAutoRentCooldownEndMinute { get; set; } = 480;
@@ -361,28 +370,21 @@ namespace CS2TradeMonitor
         [JsonIgnore]
         public static bool GlobalBlockSave
         {
-            get => SettingsHelper.GlobalBlockSave;
-            set => SettingsHelper.GlobalBlockSave = value;
+            get => SettingsPlatformBridge.GetGlobalBlockSave();
+            set => SettingsPlatformBridge.SetGlobalBlockSave(value);
         }
-
-        // 全局配置对象身份必须稳定：主窗体和后台服务会长期持有该引用。
-        private static readonly SettingsInstanceCoordinator InstanceCoordinator = new();
 
         // ★★★ 优化 3：改造 Load 方法为单例模式 ★★★
         public static Settings Load(bool forceReload = false)
         {
-            Settings settings = InstanceCoordinator.Load(
-                () => SettingsHelper.Load(forceReload),
-                forceReload);
-            settings.Language = "zh";
-            return settings;
+            return SettingsPlatformBridge.Load(forceReload);
         }
 
         // 任务栏样式读取逻辑已迁到 SettingsHelper。
 
         public Settings DeepClone()
         {
-            using var measure = AppPerformanceProfiler.Measure(
+            using var measure = SettingsPlatformBridge.Measure(
                 "Settings.DeepClone",
                 $"MonitorItems={MonitorItems?.Count ?? 0}; ItemConfigs={ItemConfigs?.Count ?? 0}",
                 thresholdMs: 1);
@@ -399,20 +401,20 @@ namespace CS2TradeMonitor
         {
             return new List<MarketAlertRule>
             {
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.QaqId, MarketAlertRuleType.CrossAbove, "QAQ 突破点位", false, 0),
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.QaqId, MarketAlertRuleType.CrossBelow, "QAQ 跌破点位", false, 0),
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.QaqId, MarketAlertRuleType.RiseByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceManager.QaqId, MarketAlertRuleType.RiseByPercent), false, 3),
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.QaqId, MarketAlertRuleType.FallByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceManager.QaqId, MarketAlertRuleType.FallByPercent), false, 3),
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.SteamDtId, MarketAlertRuleType.CrossAbove, "SteamDT 突破点位", false, 0),
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.SteamDtId, MarketAlertRuleType.CrossBelow, "SteamDT 跌破点位", false, 0),
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.SteamDtId, MarketAlertRuleType.RiseByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceManager.SteamDtId, MarketAlertRuleType.RiseByPercent), false, 3),
-                CreateBuiltinMarketAlertRule(MarketDataSourceManager.SteamDtId, MarketAlertRuleType.FallByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceManager.SteamDtId, MarketAlertRuleType.FallByPercent), false, 3)
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.Qaq, MarketAlertRuleType.CrossAbove, "QAQ 突破点位", false, 0),
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.Qaq, MarketAlertRuleType.CrossBelow, "QAQ 跌破点位", false, 0),
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.Qaq, MarketAlertRuleType.RiseByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceIds.Qaq, MarketAlertRuleType.RiseByPercent), false, 3),
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.Qaq, MarketAlertRuleType.FallByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceIds.Qaq, MarketAlertRuleType.FallByPercent), false, 3),
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.SteamDt, MarketAlertRuleType.CrossAbove, "SteamDT 突破点位", false, 0),
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.SteamDt, MarketAlertRuleType.CrossBelow, "SteamDT 跌破点位", false, 0),
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.SteamDt, MarketAlertRuleType.RiseByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceIds.SteamDt, MarketAlertRuleType.RiseByPercent), false, 3),
+                CreateBuiltinMarketAlertRule(MarketDataSourceIds.SteamDt, MarketAlertRuleType.FallByPercent, GetDefaultMarketAlertRuleName(MarketDataSourceIds.SteamDt, MarketAlertRuleType.FallByPercent), false, 3)
             };
         }
 
         public static string GetDefaultMarketAlertRuleName(string sourceId, MarketAlertRuleType ruleType)
         {
-            string source = string.Equals(sourceId, MarketDataSourceManager.SteamDtId, StringComparison.OrdinalIgnoreCase)
+            string source = string.Equals(sourceId, MarketDataSourceIds.SteamDt, StringComparison.OrdinalIgnoreCase)
                 ? "SteamDT"
                 : "QAQ";
 
@@ -596,7 +598,7 @@ namespace CS2TradeMonitor
             get => _key;
             set
             {
-                string k = UIUtils.Intern(value ?? "");
+                string k = PortableStringPool.Intern(value);
                 if (_key == k) return;
                 _key = k;
 
@@ -614,9 +616,9 @@ namespace CS2TradeMonitor
                 }
 
                 // 首次计算
-                CachedPropLabelKey = UIUtils.Intern("PROP.Label." + _key);
-                CachedPropShortLabelKey = UIUtils.Intern("PROP.ShortLabel." + _key);
-                CachedItemsKey = UIUtils.Intern("Items." + _key);
+                CachedPropLabelKey = PortableStringPool.Intern("PROP.Label." + _key);
+                CachedPropShortLabelKey = PortableStringPool.Intern("PROP.ShortLabel." + _key);
+                CachedItemsKey = PortableStringPool.Intern("Items." + _key);
 
                 if (_key == "MEM.Load" || _key == "MOBO.Temp" || _key == "DISK.Temp" || _key == "CASE.Fan" || _key == "FPS")
                     CachedUIGroup = "HOST";
@@ -624,13 +626,13 @@ namespace CS2TradeMonitor
                 {
                     CachedUIGroup = "DASH";
                     string sub = _key.Substring(5);
-                    CachedDashColorKey = UIUtils.Intern(sub + ".Color");
-                    CachedDashUnitKey = UIUtils.Intern(sub + ".Unit");
+                    CachedDashColorKey = PortableStringPool.Intern(sub + ".Color");
+                    CachedDashUnitKey = PortableStringPool.Intern(sub + ".Unit");
                 }
                 else
-                    CachedUIGroup = UIUtils.Intern(_key.Split('.')[0]);
+                    CachedUIGroup = PortableStringPool.Intern(_key.Split('.')[0]);
 
-                CachedGroupsKey = UIUtils.Intern("Groups." + CachedUIGroup);
+                CachedGroupsKey = PortableStringPool.Intern("Groups." + CachedUIGroup);
 
                 // 存入缓存
                 _protoCache[k] = this;

@@ -8,53 +8,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CS2TradeMonitor.Application.Abstractions;
+using CS2TradeMonitor.Shared.Notifications;
 using CS2TradeMonitor.src.Core;
-using CS2TradeMonitor.src.SystemServices;
 
 namespace CS2TradeMonitor.Application.Notify
 {
-    internal static class PhoneAlertNotificationDelivery
-    {
-        public static async Task<PhoneAlertSendResult> SendIfRequestedAsync(
-            Settings cfg,
-            IPhoneAlertDispatchService phoneAlerts,
-            AppNotificationEventArgs notification,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(cfg);
-            ArgumentNullException.ThrowIfNull(phoneAlerts);
-            ArgumentNullException.ThrowIfNull(notification);
-
-            if (!notification.SendToPhone)
-                return PhoneAlertSendResult.Skip("当前通知未请求手机提醒");
-
-            if (cfg.DoNotDisturbEnabled)
-                return PhoneAlertSendResult.Skip("勿扰模式已启用");
-
-            if (!phoneAlerts.IsConfigured(cfg))
-                return PhoneAlertSendResult.Skip("没有已启用且配置完整的手机提醒通道");
-
-            try
-            {
-                return await phoneAlerts.SendConfiguredAsync(
-                    cfg,
-                    notification.Title,
-                    notification.Message,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.Ignored(
-                    "PhoneAlert",
-                    "DeliverAppNotification",
-                    ex,
-                    retryable: true,
-                    category: "Notify");
-                return PhoneAlertSendResult.Fail("手机提醒发送失败");
-            }
-        }
-    }
-
     internal interface IPhoneAlertProvider
     {
         PhoneAlertChannelType Type { get; }
@@ -69,32 +27,34 @@ namespace CS2TradeMonitor.Application.Notify
 
     public sealed class PhoneAlertDispatchService : IPhoneAlertDispatchService
     {
-        private static readonly Lazy<PhoneAlertDispatchService> LazyInstance = new(() => new PhoneAlertDispatchService());
+        private static readonly Lazy<PhoneAlertDispatchService> LazyInstance = new(NotificationCorePlatform.CreatePhoneAlerts);
         public static PhoneAlertDispatchService Instance => LazyInstance.Value;
 
         private readonly Dictionary<PhoneAlertChannelType, IPhoneAlertProvider> _providers;
-
-        private PhoneAlertDispatchService()
-            : this(NotifyRuntimeServices.Resolve())
-        {
-        }
-
-        internal PhoneAlertDispatchService(NotifyRuntimeServices runtimeServices)
-            : this(
-                runtimeServices.ServerChanPush,
-                runtimeServices.WxPusher,
-                runtimeServices.DomesticHttpFactory)
-        {
-        }
+        private readonly INotificationCoreHost _host;
 
         internal PhoneAlertDispatchService(
             IServerChanPushService serverChanPushService,
             IWxPusherService wxPusherService,
             IDomesticHttpClientFactory httpFactory)
+            : this(
+                serverChanPushService,
+                wxPusherService,
+                httpFactory,
+                NoopNotificationCoreHost.Instance)
+        {
+        }
+
+        private PhoneAlertDispatchService(
+            IServerChanPushService serverChanPushService,
+            IWxPusherService wxPusherService,
+            IDomesticHttpClientFactory httpFactory,
+            INotificationCoreHost host)
         {
             if (serverChanPushService == null) throw new ArgumentNullException(nameof(serverChanPushService));
             if (wxPusherService == null) throw new ArgumentNullException(nameof(wxPusherService));
             if (httpFactory == null) throw new ArgumentNullException(nameof(httpFactory));
+            _host = host ?? throw new ArgumentNullException(nameof(host));
 
             var http = httpFactory.Create(8, useCookies: false);
 
@@ -112,17 +72,33 @@ namespace CS2TradeMonitor.Application.Notify
             _providers = providers.ToDictionary(p => p.Type, p => p);
         }
 
+        public static PhoneAlertDispatchService Create(
+            IDomesticHttpClientFactory httpFactory,
+            INotificationCoreHost host)
+        {
+            ArgumentNullException.ThrowIfNull(httpFactory);
+            ArgumentNullException.ThrowIfNull(host);
+            return new PhoneAlertDispatchService(
+                new ServerChanPushService(httpFactory, host),
+                new WxPusherService(httpFactory, host),
+                httpFactory,
+                host);
+        }
+
         public static bool IsConfigured(Settings? cfg)
+            => Instance.IsConfiguredCore(cfg);
+
+        private bool IsConfiguredCore(Settings? cfg)
         {
             return cfg != null
                 && cfg.PhoneAlertEnabled
                 && cfg.PhoneAlertChannels != null
-                && cfg.PhoneAlertChannels.Any(c => c.Enabled && Instance.IsChannelConfigured(c));
+                && cfg.PhoneAlertChannels.Any(c => c.Enabled && IsChannelConfigured(c));
         }
 
         bool IPhoneAlertDispatchService.IsConfigured(Settings? cfg)
         {
-            return IsConfigured(cfg);
+            return IsConfiguredCore(cfg);
         }
 
         public string GetHelpUrl(PhoneAlertChannelType type)
@@ -263,10 +239,16 @@ namespace CS2TradeMonitor.Application.Notify
             return string.IsNullOrWhiteSpace(channel.DisplayName) ? channel.Type.ToString() : channel.DisplayName.Trim();
         }
 
-        private static void LogProviderFailure(PhoneAlertChannelType type, string reason)
+        private void LogProviderFailure(PhoneAlertChannelType type, string reason)
         {
-            DiagnosticsLogger.Error("PhoneAlert", $"{type} send failed: {DiagnosticsLogger.Redact(reason)}");
+            _host.Error("PhoneAlert", $"send-failed:{type}:{NormalizeDiagnosticCode(reason)}");
         }
+
+        private static string NormalizeDiagnosticCode(string reason)
+            => string.Concat((reason ?? string.Empty)
+                .Where(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or ' '))
+                .Trim()
+                .Replace(' ', '-');
 
         private abstract class HttpPhoneAlertProvider : IPhoneAlertProvider
         {

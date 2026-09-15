@@ -33,6 +33,8 @@ CS2 Trade Monitor 基于 .NET 10 WinForms 与 AntdUI 构建，强调轻量常驻
 
 **悠悠有品**：同步登录与库存状态，处理报价和包租公发货配置；提供租赁自动改价与库存自动出租，但相关自动化默认关闭。
 
+**店铺求购监控**：对用户提供的悠悠官方店铺链接进行 Top 100 / 300 / 1000 热门饰品扫描，支持观察规则与历史变化查询。开始监控前需明确选择当前悠悠账号或独立账号；监控只读取求购信息，不执行买卖交易。账号配置与观察记录保存在本地。
+
 ### 💰 风控与提醒
 
 按整库或指定饰品设置止损、止盈**提醒阈值**，并按 QAQ / SteamDT 大盘点位、单品价格或涨跌幅规则触发桌面、托盘或手机提醒。手机通知可通过用户配置的第三方推送服务发送，同时支持 CS2 更新和模块健康状态检测。
@@ -81,74 +83,22 @@ Steam 单条同意和一键同意默认会显示二次确认，但允许选择�
 
 同一个物理目录只运行一个实例。如需多开，可复制完整软件目录，再分别启动各目录最外层的 `CS2TradeMonitor.exe`；不同目录的配置和数据彼此隔离。
 
-## 开发与验证
+## 公开源码构建
 
-开发环境：
-
-- Windows 10/11 x64
-- .NET 10 SDK
-- Visual Studio 2026，或可运行 .NET SDK 的命令行环境
-
-恢复、格式检查、构建和测试：
+构建环境：Windows 10/11 x64、.NET 10 SDK，以及 Visual Studio 2026 的“使用 C++ 的桌面开发”工作负载和 Windows SDK（用于原生启动器）。
 
 ```powershell
 dotnet restore .\CS2TradeMonitor.sln
-dotnet format .\CS2TradeMonitor.sln --verify-no-changes
 dotnet build .\CS2TradeMonitor.sln -c Debug
 dotnet build .\CS2TradeMonitor.sln -c Release
-dotnet test .\CS2TradeMonitor.sln -c Release --no-build
-.\scripts\Test-CodeCoverage.ps1
-dotnet list .\CS2TradeMonitor.sln package --vulnerable --include-transitive
-.\tools\Check-CodeHygiene.ps1
+.\Build-PublicRelease.ps1 -Configuration Release -Runtime win-x64
 ```
 
-生成发布包：
-
-```powershell
-.\Publish-RunTest.ps1 -Configuration Release -Runtime win-x64
-```
-
-本机部署验证：
-
-```powershell
-.\deploy-and-run.ps1
-```
-
-## 项目结构
-
-```text
-CS2TradeMonitor.sln
-CS2TradeMonitor.csproj
-CS2TradeMonitor.Bootstrapper/
-CS2TradeMonitor.Updater/
-CS2MarketData.Core/
-CS2QuantWeb.Core/
-CS2QuantWeb/
-CS2TradeMonitor.Tests/
-src/
-  Application/
-  Core/
-  System/
-  UI/
-resources/
-scripts/
-docs/
-```
-
-- `src/Core`：程序入口、模块、运行状态和核心调度。
-- `src/Application`：Steam、悠悠等应用层服务和业务投影。
-- `src/System`：历史服务、系统集成和兼容逻辑。
-- `src/UI`：WinForms / AntdUI 页面、控件和设置中心。
-- `CS2MarketData.Core`：桌面端与量化网页共享的饰品目录检索、SteamDT K 线契约和解析核心。
-- `CS2QuantWeb.Core`：无账户状态的量化计算与结构分析核心。
-- `CS2QuantWeb`：随安装包分发、默认仅监听本机回环地址的 ASP.NET Core 网页服务。
-- `CS2TradeMonitor.Tests`：xUnit 测试。
-
-更完整的分层和维护边界见 [架构文档](docs/ARCHITECTURE.md)。
+发布包输出到 `bin/release-package`。请完整解压 ZIP，并从最外层的 `CS2TradeMonitor.exe` 启动。
 
 ## 反馈与贡献
 
-使用咨询或问题反馈请加入 [【CS2交易监控】官方群](https://qm.qq.com/q/K2AuJdMxG)，群号 `1057043823`。代码和文档贡献可通过 Issue 或 Pull Request 提交。
+使用咨询或问题反馈请加入 [【CS2交易监控】官方群](https://qm.qq.com/q/K2AuJdMxG)，群号 `1057043823`。问题与建议请使用 Issue；公开仓库的贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证与第三方组件
 

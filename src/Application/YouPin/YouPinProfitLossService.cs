@@ -1,6 +1,8 @@
-using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Domain.YouPin;
+using CS2TradeMonitor.Shared.Ports;
+using CS2TradeMonitor.Shared.Trading;
+using IClock = CS2TradeMonitor.Shared.Ports.IClock;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -9,6 +11,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CS2TradeMonitor.src.Core;
@@ -35,11 +38,22 @@ namespace CS2TradeMonitor.Application.YouPin
             new("出售记录", "/api/youpin/bff/trade/sale/v1/sell/list", YouPinOrderEndpointKind.SaleSellList)
         };
 
+        private static readonly object InstanceLock = new();
         private static YouPinProfitLossService? _instance;
-        public static YouPinProfitLossService Instance => _instance ??= new YouPinProfitLossService();
+        private static Func<YouPinProfitLossServiceDependencies>? _platformFactory;
+        public static YouPinProfitLossService Instance
+        {
+            get
+            {
+                lock (InstanceLock)
+                    return _instance ??= new YouPinProfitLossService(ResolvePlatformDependencies());
+            }
+        }
 
         private readonly IYouPinAuthService _authService;
         private readonly HttpClient _http;
+        private readonly IClock _clock;
+        private readonly CS2TradeMonitor.Shared.Ports.IAppDiagnostics _diagnostics;
         private readonly SemaphoreSlim _syncLock = new(1, 1);
         private readonly object _stateLock = new();
         private readonly string _historyPath;
@@ -51,31 +65,46 @@ namespace CS2TradeMonitor.Application.YouPin
 
         public event Action? DataUpdated;
 
-        private YouPinProfitLossService()
-            : this(YouPinServiceRuntimeServices.Resolve())
-        {
-        }
-
-        internal YouPinProfitLossService(YouPinServiceRuntimeServices services)
-            : this(services.Auth, services.DomesticHttpFactory)
-        {
-        }
-
         internal YouPinProfitLossService(
             IYouPinAuthService authService,
             IDomesticHttpClientFactory httpFactory,
             string? historyPath = null)
+            : this(CreateCompatibilityDependencies(authService, httpFactory, historyPath))
         {
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-            _http = (httpFactory ?? throw new ArgumentNullException(nameof(httpFactory))).Create(25);
-            _historyPath = string.IsNullOrWhiteSpace(historyPath)
-                ? RuntimeDataPaths.GetDataFilePath("youpin_profit_loss_history.json")
-                : Path.GetFullPath(historyPath);
+        }
+
+        private YouPinProfitLossService(YouPinProfitLossServiceDependencies dependencies)
+        {
+            ArgumentNullException.ThrowIfNull(dependencies);
+            _authService = dependencies.AuthService ?? throw new ArgumentNullException(nameof(dependencies.AuthService));
+            _http = (dependencies.HttpFactory ?? throw new ArgumentNullException(nameof(dependencies.HttpFactory))).Create(25);
+            _clock = dependencies.Clock ?? throw new ArgumentNullException(nameof(dependencies.Clock));
+            _diagnostics = dependencies.Diagnostics ?? throw new ArgumentNullException(nameof(dependencies.Diagnostics));
+            _historyPath = Path.GetFullPath(
+                dependencies.PlatformHost?.HistoryPath
+                ?? throw new ArgumentNullException(nameof(dependencies.PlatformHost)));
             _history = LoadHistory();
             _lastSync = _history.LastSync;
             if (_history.Records.Count > 0)
                 _lastStatus = $"已读取本地缓存：{_history.Records.Count} 条成交记录";
         }
+
+        public static void ConfigurePlatform(Func<YouPinProfitLossServiceDependencies> platformFactory)
+        {
+            ArgumentNullException.ThrowIfNull(platformFactory);
+            lock (InstanceLock)
+            {
+                if (_instance == null)
+                    _platformFactory = platformFactory;
+            }
+        }
+
+        public static YouPinProfitLossService Create(YouPinProfitLossServiceDependencies dependencies)
+            => new(dependencies);
+
+        private static YouPinProfitLossServiceDependencies ResolvePlatformDependencies()
+            => _platformFactory?.Invoke()
+                ?? throw new InvalidOperationException("悠悠吃米/亏米服务的平台依赖尚未配置。");
 
         public YouPinProfitLossState GetState(Settings? settings)
         {
@@ -122,7 +151,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 var freshRecords = buyRecords.Concat(sellRecords).ToList();
 
                 int added = MergeRecords(freshRecords);
-                _lastSync = DateTime.Now;
+                _lastSync = _clock.UtcNow.LocalDateTime;
                 _lastStatus = $"同步成功：新增 {added} 条成交记录";
                 _lastError = "";
                 SaveHistory();
@@ -238,7 +267,7 @@ namespace CS2TradeMonitor.Application.YouPin
                     break;
 
                 pageIndex++;
-                await Task.Delay(180, cancellationToken).ConfigureAwait(false);
+                await _clock.DelayAsync(TimeSpan.FromMilliseconds(180), cancellationToken).ConfigureAwait(false);
             }
 
             return new YouPinOrderFetchResult(true, result);
@@ -329,7 +358,7 @@ namespace CS2TradeMonitor.Application.YouPin
                     .OrderBy(x => x.Time == DateTime.MinValue ? DateTime.MaxValue : x.Time)
                     .TakeLast(5000)
                     .ToList();
-                _history.LastSync = DateTime.Now;
+                _history.LastSync = _clock.UtcNow.LocalDateTime;
                 return added;
             }
         }
@@ -357,12 +386,15 @@ namespace CS2TradeMonitor.Application.YouPin
                 lock (_stateLock)
                 {
                     _history.LastSync = _lastSync;
-                    RuntimeDataPaths.WriteTextAtomic(_historyPath, JsonSerializer.Serialize(_history, JsonOptions));
+                    WriteTextAtomic(_historyPath, JsonSerializer.Serialize(_history, JsonOptions));
                 }
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Info("YouPinProfitLoss", $"保存吃米/亏米统计缓存失败: {YouPinMobileApiClient.Sanitize(ex.Message)}");
+                ReportDiagnostic(
+                    "youpin.profit-loss.history-save-failed",
+                    $"保存吃米/亏米统计缓存失败: {YouPinMobileApiClient.Sanitize(ex.Message)}",
+                    DiagnosticSeverity.Warning);
             }
         }
 
@@ -407,7 +439,92 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private void RaiseDataUpdated()
         {
-            try { DataUpdated?.Invoke(); } catch (Exception ex) { DiagnosticsLogger.Ignored(ex); }
+            try
+            {
+                DataUpdated?.Invoke();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                ReportDiagnostic(
+                    "youpin.profit-loss.data-updated-handler-failed",
+                    "吃米/亏米统计更新事件处理失败。",
+                    DiagnosticSeverity.Warning);
+            }
+        }
+
+        private void ReportDiagnostic(string code, string message, DiagnosticSeverity severity)
+        {
+            try
+            {
+                _ = _diagnostics.ReportAsync(new DiagnosticEvent(
+                    code,
+                    message,
+                    severity,
+                    _clock.UtcNow)).AsTask();
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // Diagnostics must never change the desktop-authoritative service result.
+            }
+        }
+
+        private static void WriteTextAtomic(string path, string content)
+        {
+            string? directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            string tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(tempPath, content, new UTF8Encoding(false));
+                File.Move(tempPath, path, overwrite: true);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                }
+                catch
+                {
+                    // Preserve the original write result; stale temp cleanup is best-effort.
+                }
+            }
+        }
+
+        private static YouPinProfitLossServiceDependencies CreateCompatibilityDependencies(
+            IYouPinAuthService authService,
+            IDomesticHttpClientFactory httpFactory,
+            string? historyPath)
+        {
+            string path = string.IsNullOrWhiteSpace(historyPath)
+                ? Path.Combine(Path.GetTempPath(), "cs2trade-profitloss-tests", Guid.NewGuid().ToString("N"), "history.json")
+                : Path.GetFullPath(historyPath);
+            return new YouPinProfitLossServiceDependencies(
+                authService,
+                httpFactory,
+                CompatibilityClock.Instance,
+                new CompatibilityPlatformHost(path),
+                CompatibilityDiagnostics.Instance);
+        }
+
+        private sealed record CompatibilityPlatformHost(string HistoryPath) : IYouPinProfitLossPlatformHost;
+
+        private sealed class CompatibilityClock : IClock
+        {
+            public static CompatibilityClock Instance { get; } = new();
+            public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+            public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken = default)
+                => Task.Delay(delay, cancellationToken);
+        }
+
+        private sealed class CompatibilityDiagnostics : CS2TradeMonitor.Shared.Ports.IAppDiagnostics
+        {
+            public static CompatibilityDiagnostics Instance { get; } = new();
+            public ValueTask ReportAsync(DiagnosticEvent diagnosticEvent, CancellationToken cancellationToken = default)
+                => ValueTask.CompletedTask;
         }
 
         public void Dispose()

@@ -1,8 +1,7 @@
-using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.YouPin;
 using CS2TradeMonitor.Domain.Steam;
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -17,23 +16,13 @@ namespace CS2TradeMonitor.Application.Steam
     {
         private const int MaxRecordCount = 100;
         private const string RecordSnapshotFileName = "steam_auto_trade_records.json";
-        private static readonly TimeSpan RecoverableConfirmationAge = TimeSpan.FromHours(24);
-        private static readonly TimeSpan[] RecoveryRetryDelays =
-        {
-            TimeSpan.FromSeconds(2),
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromSeconds(3)
-        };
+        private static readonly TimeSpan[] RecoveryRetryDelays = TradeAutomationPolicy.RecoveryRetryDelays.ToArray();
 
         private readonly object _sync = new();
-        private readonly ISteamOfferService _offerService;
-        private readonly IYouPinSaleReminderService _youPinSaleReminders;
+        private readonly IAutoConfirmationSteamGateway _offerService;
+        private readonly IAutoConfirmationYouPinGateway _youPinSaleReminders;
+        private readonly IAutoConfirmationRuntime _runtime;
+        private readonly IAutoConfirmationAuditLog _auditLog;
         private readonly Action? _stateChanged;
         private readonly string _recordSnapshotPath;
         private readonly List<SteamAutoTradeRecord> _records = new();
@@ -49,6 +38,7 @@ namespace CS2TradeMonitor.Application.Steam
         private int _lastLoggedAutoTradeIntervalSeconds;
         private DateTime _lastAutoTradeStartLogTime;
         private bool _disposed;
+        private bool _externalCycleRunning;
         private DateTime _today = DateTime.Today;
         internal Func<TimeSpan, CancellationToken, Task> RecoveryDelayAsync { get; set; } = Task.Delay;
 
@@ -66,16 +56,20 @@ namespace CS2TradeMonitor.Application.Steam
         public bool AllowYouPinVerifiedAccept => _settings.AcceptYouPinPurchaseEnabled;
 
         public AutoConfirmationService(
-            ISteamOfferService offerService,
-            IYouPinSaleReminderService youPinSaleReminders,
+            IAutoConfirmationSteamGateway offerService,
+            IAutoConfirmationYouPinGateway youPinSaleReminders,
+            IAutoConfirmationRuntime runtime,
+            IAutoConfirmationAuditLog auditLog,
             Action? stateChanged = null,
             string? recordSnapshotPath = null)
         {
             _offerService = offerService ?? throw new ArgumentNullException(nameof(offerService));
             _youPinSaleReminders = youPinSaleReminders ?? throw new ArgumentNullException(nameof(youPinSaleReminders));
+            _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+            _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
             _stateChanged = stateChanged;
             _recordSnapshotPath = string.IsNullOrWhiteSpace(recordSnapshotPath)
-                ? RuntimeDataPaths.GetDataFilePath(RecordSnapshotFileName)
+                ? _runtime.GetDataFilePath(RecordSnapshotFileName)
                 : recordSnapshotPath;
             _youPinSaleReminders.NewWaitDeliverOrdersDetected += OnNewWaitDeliverOrdersDetected;
             LoadRecordSnapshot();
@@ -97,6 +91,11 @@ namespace CS2TradeMonitor.Application.Steam
         public void StartAutoTrade(SteamAutoTradeSettings settings)
         {
             ThrowIfDisposed();
+            lock (_sync)
+            {
+                if (_externalCycleRunning)
+                    throw new InvalidOperationException("外部调度周期正在运行，不能同时启动内部定时器。");
+            }
             Stop();
 
             settings ??= SteamAutoTradeSettings.ReadOnly(300);
@@ -119,8 +118,56 @@ namespace CS2TradeMonitor.Application.Steam
             }
 
             if (shouldLogStart)
-                SteamOfferAuditLog.LogAutoTradeStarted(settings.Enabled, settings.IntervalSeconds);
+                _auditLog.LogAutoTradeStarted(settings.Enabled, settings.IntervalSeconds);
             NotifyStateChanged();
+        }
+
+        /// <summary>
+        /// Executes exactly one desktop-authoritative automation cycle for a
+        /// host-owned scheduler. It never creates a PeriodicTimer and cannot run
+        /// at the same time as the legacy desktop timer loop.
+        /// </summary>
+        public async Task<SteamAutoTradeState> RunExternalCycleAsync(
+            SteamAutoTradeSettings settings,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            settings ??= SteamAutoTradeSettings.ReadOnly(300);
+            settings.IntervalSeconds = Math.Clamp(
+                settings.IntervalSeconds <= 0 ? 300 : settings.IntervalSeconds,
+                30,
+                3600);
+
+            lock (_sync)
+            {
+                if (IsRunning || _externalCycleRunning)
+                {
+                    throw new InvalidOperationException(
+                        "Steam 自动化已有周期正在运行，已拒绝第二个写入入口。");
+                }
+
+                _externalCycleRunning = true;
+                _settings = CloneSettings(settings);
+                NextCheckTime = DateTime.Now;
+            }
+
+            try
+            {
+                await RecoverPersistedMobileConfirmationsOnceAsync(
+                    cancellationToken,
+                    normalCycle: true).ConfigureAwait(false);
+                await PollCycleAsync(cancellationToken).ConfigureAwait(false);
+                return GetAutoTradeState();
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    _externalCycleRunning = false;
+                    NextCheckTime = DateTime.MinValue;
+                }
+                NotifyStateChanged();
+            }
         }
 
         public void Stop()
@@ -203,8 +250,8 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SetFailure("Steam 报价后台轮询异常：" + SteamOfferAuditLog.RedactSecrets(ex.Message));
-                SteamOfferAuditLog.Error("Steam auto trade service loop failed", ex);
+                SetFailure("Steam 报价后台轮询异常：" + _auditLog.RedactSecrets(ex.Message));
+                _auditLog.Error("Steam auto trade service loop failed", ex);
             }
             finally
             {
@@ -287,8 +334,8 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SetFailure("轮询失败：" + SteamOfferAuditLog.RedactSecrets(ex.Message));
-                SteamOfferAuditLog.Error("Steam auto trade poll cycle failed", ex);
+                SetFailure("轮询失败：" + _auditLog.RedactSecrets(ex.Message));
+                _auditLog.Error("Steam auto trade poll cycle failed", ex);
             }
         }
 
@@ -313,9 +360,9 @@ namespace CS2TradeMonitor.Application.Steam
 
         private async Task ProcessLoadedOffersAsync(SteamAutoTradeSettings settings, CancellationToken ct)
         {
-            SteamOfferState state = _offerService.GetState();
+            IReadOnlyList<SteamOfferItem> offers = _offerService.GetAutoTradeOffers();
             YouPinSaleReminderState youPinState = _youPinSaleReminders.GetState();
-            IReadOnlyList<SteamAutoTradePlanItem> offerPlans = SteamAutoTradePlanner.BuildOfferPlans(state.Offers, youPinState, settings);
+            IReadOnlyList<SteamAutoTradePlanItem> offerPlans = SteamAutoTradePlanner.BuildOfferPlans(offers, youPinState, settings);
             IReadOnlyList<SteamAutoTradePlanItem> sendPlans = SteamAutoTradePlanner.BuildYouPinSendPlans(youPinState, settings);
 
             foreach (SteamAutoTradePlanItem plan in offerPlans)
@@ -438,7 +485,7 @@ namespace CS2TradeMonitor.Application.Steam
                 return;
             }
 
-            YouPinSaleActionResult sendResult = await _youPinSaleReminders.SendOfferAsync(plan.MatchedOrderNo, SteamOfferAuditLog.TriggerBackgroundAuto).ConfigureAwait(false);
+            YouPinSaleActionResult sendResult = await _youPinSaleReminders.SendOfferAsync(plan.MatchedOrderNo, _auditLog.BackgroundTrigger).ConfigureAwait(false);
             string tradeOfferId = string.IsNullOrWhiteSpace(sendResult.TradeOfferId) ? plan.TradeOfferId : sendResult.TradeOfferId;
 
             if (!sendResult.Ok && IsAlreadySentOrWaitingConfirmation(sendResult.Message))
@@ -591,7 +638,7 @@ namespace CS2TradeMonitor.Application.Steam
             YouPinSaleActionResult result = await _youPinSaleReminders.ConfirmOfferAsync(
                 plan.MatchedOrderNo,
                 plan.TradeOfferId,
-                SteamOfferAuditLog.TriggerBackgroundAuto).ConfigureAwait(false);
+                _auditLog.BackgroundTrigger).ConfigureAwait(false);
             string tradeOfferId = FirstText(result.TradeOfferId, plan.TradeOfferId);
             AddRecord(new SteamAutoTradeRecord
             {
@@ -640,8 +687,8 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SetFailure("悠悠新订单即时处理异常：" + SteamOfferAuditLog.RedactSecrets(ex.Message));
-                SteamOfferAuditLog.Error("Immediate YouPin loaded-order processing failed", ex);
+                SetFailure("悠悠新订单即时处理异常：" + _auditLog.RedactSecrets(ex.Message));
+                _auditLog.Error("Immediate YouPin loaded-order processing failed", ex);
             }
         }
 
@@ -803,7 +850,7 @@ namespace CS2TradeMonitor.Application.Steam
             bool allowSuccess)
         {
             YouPinSaleReminderCheckResult refresh = await _youPinSaleReminders
-                .CheckQuoteNowAsync(SteamOfferAuditLog.TriggerBackgroundAuto)
+                .CheckQuoteNowAsync(_auditLog.BackgroundTrigger)
                 .ConfigureAwait(false);
             if (!refresh.Ok)
                 return null;
@@ -811,7 +858,9 @@ namespace CS2TradeMonitor.Application.Steam
             YouPinSaleOrder? order = _youPinSaleReminders
                 .GetState()
                 .RecentWaitDeliverOrders
-                .FirstOrDefault(candidate => MatchesOrderNo(candidate, plan.MatchedOrderNo));
+                .FirstOrDefault(candidate => SteamAutoTradeConfirmationStateMachine.MatchesOrderNo(
+                    candidate,
+                    plan.MatchedOrderNo));
             if (order == null)
             {
                 if (!allowSuccess)
@@ -823,8 +872,9 @@ namespace CS2TradeMonitor.Application.Steam
             }
 
             string tradeOfferId = FirstText(order.TradeOfferId, order.OfferId);
-            if (!string.IsNullOrWhiteSpace(tradeOfferId)
-                && !string.Equals(tradeOfferId.Trim(), plan.TradeOfferId.Trim(), StringComparison.OrdinalIgnoreCase))
+            if (SteamAutoTradeConfirmationStateMachine.HasTradeOfferIdConflict(
+                plan.TradeOfferId,
+                tradeOfferId))
             {
                 const string mismatch = "悠悠订单回读的 Steam 报价号与当前自动确认目标不一致，已停止自动处理。";
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.Unresolved, "需人工核对", mismatch, countResult: false);
@@ -834,21 +884,23 @@ namespace CS2TradeMonitor.Application.Steam
             string message = string.Join(" / ", new[] { order.OrderStatusDesc, order.Message }
                 .Where(text => !string.IsNullOrWhiteSpace(text))
                 .Distinct(StringComparer.Ordinal));
-            if (LooksLikeYouPinOfferFailed(message))
+            SteamAutoTradeConfirmationReadback readback = SteamAutoTradeConfirmationStateMachine
+                .EvaluateYouPinReadback(message);
+            if (readback.IndicatesFailure)
             {
                 string failure = FirstText(message, "悠悠订单回读确认该租赁报价已失败或取消。");
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.TerminalFailure, "失败", failure, countResult: true);
                 return SteamOfferActionResult.Failed(failure, "youpin_terminal_order_state");
             }
 
-            if (allowSuccess && LooksLikeYouPinRentalCompleted(message))
+            if (allowSuccess && readback.IndicatesRentalCompletion)
             {
                 string success = FirstText(message, "悠悠订单回读确认该租赁报价已完成。");
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.AutoMobileConfirm, "成功", success, countResult: true);
                 return SteamOfferActionResult.Success(success);
             }
 
-            if (finalCheck && LooksLikeYouPinWaitingForOurConfirmation(message))
+            if (finalCheck && readback.IndicatesWaitingForOurConfirmation)
             {
                 const string failure = "Steam 手机确认未在 30 秒内完成，悠悠订单仍在等待我方令牌确认。";
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.TerminalFailure, "失败", failure, countResult: true);
@@ -856,15 +908,6 @@ namespace CS2TradeMonitor.Application.Steam
             }
 
             return null;
-        }
-
-        private static bool MatchesOrderNo(YouPinSaleOrder order, string orderNo)
-        {
-            return string.Equals(order.OrderNo?.Trim(), orderNo.Trim(), StringComparison.OrdinalIgnoreCase)
-                || (order.OrderNos?.Any(candidate => string.Equals(
-                    candidate?.Trim(),
-                    orderNo.Trim(),
-                    StringComparison.OrdinalIgnoreCase)) ?? false);
         }
 
         private async Task<SteamOfferActionResult?> TryResolveFromYouPinAsync(
@@ -875,13 +918,14 @@ namespace CS2TradeMonitor.Application.Steam
                 return null;
 
             YouPinSaleActionResult result = await _youPinSaleReminders
-                .QueryOfferStatusAsync(plan.MatchedOrderNo, SteamOfferAuditLog.TriggerBackgroundAuto)
+                .QueryOfferStatusAsync(plan.MatchedOrderNo, _auditLog.BackgroundTrigger)
                 .ConfigureAwait(false);
             if (!result.Ok)
                 return null;
 
-            if (!string.IsNullOrWhiteSpace(result.TradeOfferId)
-                && !string.Equals(result.TradeOfferId.Trim(), plan.TradeOfferId.Trim(), StringComparison.OrdinalIgnoreCase))
+            if (SteamAutoTradeConfirmationStateMachine.HasTradeOfferIdConflict(
+                plan.TradeOfferId,
+                result.TradeOfferId))
             {
                 const string mismatch = "悠悠返回的 Steam 报价号与当前自动确认目标不一致，已停止自动处理。";
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.Unresolved, "需人工核对", mismatch, countResult: false);
@@ -889,21 +933,23 @@ namespace CS2TradeMonitor.Application.Steam
             }
 
             string message = result.Message ?? string.Empty;
-            if (LooksLikeYouPinConfirmationSucceeded(message))
+            SteamAutoTradeConfirmationReadback readback = SteamAutoTradeConfirmationStateMachine
+                .EvaluateYouPinReadback(message);
+            if (readback.IndicatesSuccess)
             {
                 string success = FirstText(message, "悠悠已确认该 Steam 报价。等待交易对方接收。");
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.AutoMobileConfirm, "成功", success, countResult: true);
                 return SteamOfferActionResult.Success(success);
             }
 
-            if (LooksLikeYouPinOfferFailed(message))
+            if (readback.IndicatesFailure)
             {
                 string failure = FirstText(message, "悠悠确认该报价已失败或取消。");
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.TerminalFailure, "失败", failure, countResult: true);
                 return SteamOfferActionResult.Failed(failure, "youpin_terminal_offer_state");
             }
 
-            if (finalCheck && LooksLikeYouPinWaitingForOurConfirmation(message))
+            if (finalCheck && readback.IndicatesWaitingForOurConfirmation)
             {
                 const string failure = "Steam 手机确认未在 30 秒内完成，悠悠订单仍在等待我方令牌确认。";
                 AddConfirmationOutcomeRecord(plan, SteamAutoTradeRecordType.TerminalFailure, "失败", failure, countResult: true);
@@ -911,43 +957,6 @@ namespace CS2TradeMonitor.Application.Steam
             }
 
             return null;
-        }
-
-        private static bool LooksLikeYouPinConfirmationSucceeded(string message)
-        {
-            string text = message ?? string.Empty;
-            return text.Contains("待对方确认", StringComparison.Ordinal)
-                || text.Contains("等待对方确认", StringComparison.Ordinal)
-                || text.Contains("确认报价成功", StringComparison.Ordinal)
-                || text.Contains("报价确认成功", StringComparison.Ordinal)
-                || text.Contains("已完成", StringComparison.Ordinal);
-        }
-
-        private static bool LooksLikeYouPinRentalCompleted(string message)
-        {
-            string text = message ?? string.Empty;
-            return LooksLikeYouPinConfirmationSucceeded(text)
-                || text.Contains("已发货", StringComparison.Ordinal)
-                || text.Contains("转交成功", StringComparison.Ordinal)
-                || text.Contains("出租成功", StringComparison.Ordinal);
-        }
-
-        private static bool LooksLikeYouPinOfferFailed(string message)
-        {
-            string text = message ?? string.Empty;
-            return text.Contains("报价发送失败", StringComparison.Ordinal)
-                || text.Contains("确认报价失败", StringComparison.Ordinal)
-                || text.Contains("已取消", StringComparison.Ordinal)
-                || text.Contains("已拒绝", StringComparison.Ordinal);
-        }
-
-        private static bool LooksLikeYouPinWaitingForOurConfirmation(string message)
-        {
-            string text = message ?? string.Empty;
-            return text.Contains("待您确认", StringComparison.Ordinal)
-                || text.Contains("等待您回应", StringComparison.Ordinal)
-                || text.Contains("等待Steam令牌确认", StringComparison.Ordinal)
-                || text.Contains("待您令牌验证", StringComparison.Ordinal);
         }
 
         private void AddConfirmationOutcomeRecord(
@@ -1037,27 +1046,13 @@ namespace CS2TradeMonitor.Application.Steam
 
         private IReadOnlyList<SteamAutoTradePlanItem> BuildRecoverableConfirmationPlans()
         {
-            DateTime cutoff = DateTime.Now - RecoverableConfirmationAge;
+            DateTime now = DateTime.Now;
             lock (_sync)
             {
-                if (!_settings.Enabled)
-                    return Array.Empty<SteamAutoTradePlanItem>();
-
-                return _records
-                    .Where(record => record.CreatedTime >= cutoff
-                        && IsRecoverableConfirmationRecord(record)
-                        && !string.IsNullOrWhiteSpace(record.TradeOfferId)
-                        && IsRecoveryEnabledForRecord(record, _settings))
-                    .Select(BuildConfirmationPlan)
-                    .ToList();
+                return SteamAutoTradeRecoveryStateMachine
+                    .Evaluate(_records, _settings, orderNo: null, now)
+                    .ConfirmationPlans;
             }
-        }
-
-        private static bool IsRecoveryEnabledForRecord(SteamAutoTradeRecord record, SteamAutoTradeSettings settings)
-        {
-            return record.Source.Contains("出租", StringComparison.Ordinal)
-                ? settings.SendYouPinRentalEnabled
-                : settings.SendYouPinSaleEnabled;
         }
 
         private bool IsConfirmationEnabledForPlanNoLock(SteamAutoTradePlanItem plan)
@@ -1077,71 +1072,43 @@ namespace CS2TradeMonitor.Application.Steam
             if (!string.IsNullOrWhiteSpace(plan.TradeOfferId))
                 return;
 
-            string orderNo = NormalizeRecordKeyPart(plan.MatchedOrderNo);
-            if (string.IsNullOrWhiteSpace(orderNo))
+            if (string.IsNullOrWhiteSpace(NormalizeRecordKeyPart(plan.MatchedOrderNo)))
                 return;
 
             lock (_sync)
             {
-                DateTime cutoff = DateTime.Now - RecoverableConfirmationAge;
-                SteamAutoTradeRecord? pending = _records.FirstOrDefault(record =>
-                    record.CreatedTime >= cutoff
-                    && IsTrackedTradeOfferRecordType(record.Type)
-                    && string.Equals(NormalizeRecordKeyPart(record.OrderNo), orderNo, StringComparison.Ordinal)
-                    && !string.IsNullOrWhiteSpace(record.TradeOfferId));
-                if (pending != null)
-                    plan.TradeOfferId = pending.TradeOfferId;
+                string persistedTradeOfferId = SteamAutoTradeRecoveryStateMachine
+                    .Evaluate(_records, _settings, plan.MatchedOrderNo, DateTime.Now)
+                    .PersistedTradeOfferId;
+                if (!string.IsNullOrWhiteSpace(persistedTradeOfferId))
+                    plan.TradeOfferId = persistedTradeOfferId;
             }
         }
 
         private bool HasRecoverablePersistedTradeOffer(SteamAutoTradePlanItem plan)
         {
-            string orderNo = NormalizeRecordKeyPart(plan.MatchedOrderNo);
-            if (string.IsNullOrWhiteSpace(orderNo))
+            if (string.IsNullOrWhiteSpace(NormalizeRecordKeyPart(plan.MatchedOrderNo)))
                 return false;
 
-            DateTime cutoff = DateTime.Now - RecoverableConfirmationAge;
             lock (_sync)
             {
-                return _records.Any(record =>
-                    record.CreatedTime >= cutoff
-                    && IsRecoverableConfirmationRecord(record)
-                    && string.Equals(NormalizeRecordKeyPart(record.OrderNo), orderNo, StringComparison.Ordinal)
-                    && !string.IsNullOrWhiteSpace(record.TradeOfferId));
+                return SteamAutoTradeRecoveryStateMachine
+                    .Evaluate(_records, _settings, plan.MatchedOrderNo, DateTime.Now)
+                    .HasRecoverablePersistedTradeOffer;
             }
         }
 
         private bool HasRecentSendAwaitingTradeOfferId(SteamAutoTradePlanItem plan)
         {
-            string orderNo = NormalizeRecordKeyPart(plan.MatchedOrderNo);
-            if (string.IsNullOrWhiteSpace(orderNo))
+            if (string.IsNullOrWhiteSpace(NormalizeRecordKeyPart(plan.MatchedOrderNo)))
                 return false;
 
-            DateTime cutoff = DateTime.Now - RecoverableConfirmationAge;
             lock (_sync)
             {
-                return _records.Any(record =>
-                    record.CreatedTime >= cutoff
-                    && IsTrackedTradeOfferRecordType(record.Type)
-                    && string.Equals(NormalizeRecordKeyPart(record.OrderNo), orderNo, StringComparison.Ordinal)
-                    && string.IsNullOrWhiteSpace(record.TradeOfferId));
+                return SteamAutoTradeRecoveryStateMachine
+                    .Evaluate(_records, _settings, plan.MatchedOrderNo, DateTime.Now)
+                    .HasRecentSendAwaitingTradeOfferId;
             }
-        }
-
-        private static SteamAutoTradePlanItem BuildConfirmationPlan(SteamAutoTradeRecord record)
-        {
-            return new SteamAutoTradePlanItem
-            {
-                TradeOfferId = record.TradeOfferId,
-                Direction = record.Direction,
-                Category = record.Source.Contains("出租", StringComparison.Ordinal)
-                    ? SteamAutoTradeCategory.YouPinRental
-                    : SteamAutoTradeCategory.YouPinSale,
-                ItemNames = record.ItemNames.ToList(),
-                MatchedOrderNo = record.OrderNo,
-                Action = SteamAutoTradeAction.ConfirmMobile,
-                Allowed = true
-            };
         }
 
         private void AddPendingRecord(
@@ -1196,8 +1163,8 @@ namespace CS2TradeMonitor.Application.Steam
         {
             record ??= new SteamAutoTradeRecord();
             record.Time = record.Time == default ? DateTime.Now : record.Time;
-            record.Reason = SteamOfferAuditLog.RedactSecrets(record.Reason);
-            record.Result = SteamOfferAuditLog.RedactSecrets(record.Result);
+            record.Reason = _auditLog.RedactSecrets(record.Reason);
+            record.Result = _auditLog.RedactSecrets(record.Result);
             string recordKey = BuildRecordDedupeKey(record);
             bool countable = countResult && IsCountedRecordType(record.Type);
             List<SteamAutoTradeRecord> snapshot;
@@ -1258,7 +1225,7 @@ namespace CS2TradeMonitor.Application.Steam
 
         private void SetFailure(string message)
         {
-            string clean = SteamOfferAuditLog.RedactSecrets(message);
+            string clean = _auditLog.RedactSecrets(message);
             lock (_sync)
             {
                 ResetDailyCountersIfNeededNoLock();
@@ -1267,7 +1234,7 @@ namespace CS2TradeMonitor.Application.Steam
                 LastStatus = clean;
             }
 
-            SteamOfferAuditLog.LogAutoTradeFailure(clean);
+            _auditLog.LogAutoTradeFailure(clean);
             NotifyStateChanged();
         }
 
@@ -1396,7 +1363,7 @@ namespace CS2TradeMonitor.Application.Steam
                     return;
 
                 string json = File.ReadAllText(_recordSnapshotPath);
-                var snapshot = JsonSerializer.Deserialize<AutoTradeRecordSnapshot>(json, ServiceInfra.DefaultJsonOptions);
+                var snapshot = JsonSerializer.Deserialize<AutoTradeRecordSnapshot>(json, _runtime.JsonSerializerOptions);
                 IEnumerable<SteamAutoTradeRecord> loaded = snapshot?.Records is { } records
                     ? records
                     : Array.Empty<SteamAutoTradeRecord>();
@@ -1417,7 +1384,7 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.DiagnosticError("Loading Steam auto trade record snapshot failed.", ex);
+                _auditLog.DiagnosticError("Loading Steam auto trade record snapshot failed.", ex);
             }
         }
 
@@ -1436,12 +1403,12 @@ namespace CS2TradeMonitor.Application.Steam
                         .Select(CloneRecord)
                         .ToList()
                 };
-                string json = JsonSerializer.Serialize(snapshot, ServiceInfra.DefaultJsonOptions);
-                RuntimeDataPaths.WriteTextAtomic(_recordSnapshotPath, json);
+                string json = JsonSerializer.Serialize(snapshot, _runtime.JsonSerializerOptions);
+                _runtime.WriteTextAtomic(_recordSnapshotPath, json);
             }
             catch (Exception ex)
             {
-                SteamOfferAuditLog.DiagnosticError("Saving Steam auto trade record snapshot failed.", ex);
+                _auditLog.DiagnosticError("Saving Steam auto trade record snapshot failed.", ex);
             }
         }
 
@@ -1475,7 +1442,7 @@ namespace CS2TradeMonitor.Application.Steam
                 LastFailureReason = FirstText(latestCounted.Reason, latestCounted.Result);
         }
 
-        private static List<SteamAutoTradeRecord> NormalizeAndDedupeRecords(IEnumerable<SteamAutoTradeRecord> records)
+        private List<SteamAutoTradeRecord> NormalizeAndDedupeRecords(IEnumerable<SteamAutoTradeRecord> records)
         {
             var result = new List<SteamAutoTradeRecord>();
             var indexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1505,13 +1472,13 @@ namespace CS2TradeMonitor.Application.Steam
             return result;
         }
 
-        private static SteamAutoTradeRecord NormalizeRecord(SteamAutoTradeRecord record)
+        private SteamAutoTradeRecord NormalizeRecord(SteamAutoTradeRecord record)
         {
             var clone = CloneRecord(record);
             clone.Time = clone.Time == default ? DateTime.Now : clone.Time;
             clone.CreatedTime = clone.CreatedTime == default ? clone.Time : clone.CreatedTime;
-            clone.Reason = SteamOfferAuditLog.RedactSecrets(clone.Reason);
-            clone.Result = SteamOfferAuditLog.RedactSecrets(clone.Result);
+            clone.Reason = _auditLog.RedactSecrets(clone.Reason);
+            clone.Result = _auditLog.RedactSecrets(clone.Result);
             clone.Source = clone.Source?.Trim() ?? "";
             clone.TradeOfferId = clone.TradeOfferId?.Trim() ?? "";
             clone.OrderNo = clone.OrderNo?.Trim() ?? "";
@@ -1538,7 +1505,7 @@ namespace CS2TradeMonitor.Application.Steam
         private static bool ShouldRecoverLegacySteamNotFoundRecord(SteamAutoTradeRecord record)
         {
             return record.Type == SteamAutoTradeRecordType.Unresolved
-                && record.CreatedTime >= DateTime.Now - RecoverableConfirmationAge
+                && TradeAutomationPolicy.IsWithinRecoveryWindow(record.CreatedTime, DateTime.Now)
                 && !string.IsNullOrWhiteSpace(record.TradeOfferId)
                 && !string.IsNullOrWhiteSpace(record.OrderNo)
                 && (record.Reason.Contains("Steam 未返回该报价", StringComparison.Ordinal)
@@ -1557,18 +1524,12 @@ namespace CS2TradeMonitor.Application.Steam
 
         private static IEnumerable<string> BuildTransactionKeys(string? orderNo, string? tradeOfferId)
         {
-            string normalizedOrderNo = NormalizeRecordKeyPart(orderNo);
-            if (!string.IsNullOrWhiteSpace(normalizedOrderNo))
-                yield return "order:" + normalizedOrderNo;
-
-            string normalizedTradeOfferId = NormalizeRecordKeyPart(tradeOfferId);
-            if (!string.IsNullOrWhiteSpace(normalizedTradeOfferId))
-                yield return "offer:" + normalizedTradeOfferId;
+            return TradeAutomationPolicy.BuildTransactionKeys(orderNo, tradeOfferId);
         }
 
         private static string NormalizeRecordKeyPart(string? value)
         {
-            return (value ?? "").Trim().ToUpperInvariant();
+            return TradeAutomationPolicy.NormalizeIdentity(value);
         }
 
         private static bool IsCountedRecordType(SteamAutoTradeRecordType type)
@@ -1585,23 +1546,6 @@ namespace CS2TradeMonitor.Application.Steam
                 or SteamAutoTradeRecordType.ManualAccept
                 or SteamAutoTradeRecordType.ManualSend
                 or SteamAutoTradeRecordType.ManualMobileConfirm;
-        }
-
-        private static bool IsRecoverableConfirmationRecord(SteamAutoTradeRecord record)
-        {
-            return record.Type is SteamAutoTradeRecordType.AutoSend
-                or SteamAutoTradeRecordType.AutoYouPinConfirm
-                or SteamAutoTradeRecordType.ManualSend
-                || record.Type == SteamAutoTradeRecordType.Pending
-                && record.PendingStage == SteamAutoTradePendingStage.MobileConfirmation;
-        }
-
-        private static bool IsTrackedTradeOfferRecordType(SteamAutoTradeRecordType type)
-        {
-            return type is SteamAutoTradeRecordType.AutoSend
-                or SteamAutoTradeRecordType.AutoYouPinConfirm
-                or SteamAutoTradeRecordType.ManualSend
-                or SteamAutoTradeRecordType.Pending;
         }
 
         private static bool IsTerminalSuccessRecordType(SteamAutoTradeRecordType type)

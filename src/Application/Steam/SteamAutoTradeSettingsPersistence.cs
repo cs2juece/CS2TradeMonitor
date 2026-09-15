@@ -1,4 +1,3 @@
-using CS2TradeMonitor.src.Core;
 using System;
 
 namespace CS2TradeMonitor.Application.Steam

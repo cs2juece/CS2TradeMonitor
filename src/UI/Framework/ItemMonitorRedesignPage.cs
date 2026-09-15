@@ -175,7 +175,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             _searchCard = CreateShellCard(ItemMonitorRedesignPageModel.SearchCardHeight);
             _listCard = CreateShellCard(ItemMonitorRedesignPageModel.ListCardHeight);
             _keywordInput = new LiteUnderlineInput("", "", "", 420) { Placeholder = "输入饰品名（支持中文）" };
-            _addButton = new LiteButton("添加", true) { Width = 96, Height = 46, Enabled = true };
+            _addButton = new LiteButton("添加", true) { Width = UIUtils.S(96), Height = UIUtils.S(46), Enabled = true };
             _statusLabel = CreateLabel("请先选择候选", UIFonts.Regular(9f), UIColors.Positive, ContentAlignment.MiddleLeft);
             _clearButton = new LiteButton("清空", false) { Width = UIUtils.S(96), Height = UIUtils.S(46) };
             _candidateList = CreateCandidateList();
@@ -371,7 +371,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         {
             _listCard.Controls.Add(_listTitle);
             _listCard.Controls.Add(_itemRowsSummary);
-            var refresh = new LiteButton("⟳ 刷新价格", false) { Width = 134, Height = 40 };
+            var refresh = new LiteButton("⟳ 刷新价格", false) { Width = UIUtils.S(134), Height = UIUtils.S(40) };
             refresh.Click += async (_, __) => await RefreshAllPricesAsync(refresh);
             _listCard.Controls.Add(refresh);
 
@@ -385,18 +385,23 @@ namespace CS2TradeMonitor.src.UI.Framework
             _listCard.Layout += (_, __) =>
             {
                 int width = Math.Max(1, _listCard.ClientSize.Width);
-                _listTitle.SetBounds(22, 18, 220, 34);
-                refresh.SetBounds(width - 22 - 134, 18, 134, 40);
-                _itemRowsSummary.SetBounds(_listTitle.Right + 12, 21, Math.Max(1, refresh.Left - _listTitle.Right - 28), 28);
-                _listHeader.SetBounds(22, 70, width - 44, 34);
+                int side = UIUtils.S(22);
+                _listTitle.SetBounds(side, UIUtils.S(18), UIUtils.S(220), UIUtils.S(34));
+                refresh.SetBounds(width - side - UIUtils.S(134), UIUtils.S(18), UIUtils.S(134), UIUtils.S(40));
+                _itemRowsSummary.SetBounds(
+                    _listTitle.Right + UIUtils.S(12),
+                    UIUtils.S(21),
+                    Math.Max(1, refresh.Left - _listTitle.Right - UIUtils.S(28)),
+                    UIUtils.S(28));
+                _listHeader.SetBounds(side, UIUtils.S(70), width - side * 2, UIUtils.S(34));
                 LayoutListHeader(_listHeader);
-                int rowsTop = 112;
+                int rowsTop = UIUtils.S(112);
                 int rowsHeight = _itemRowsHost.Visible ? Math.Max(UIUtils.S(58), _itemRowsHost.Height) : UIUtils.S(90);
-                _itemRowsHost.SetBounds(22, rowsTop, width - 44, rowsHeight);
-                _toggleItemRowsButton.SetBounds(width - 22 - _toggleItemRowsButton.Width, rowsTop + rowsHeight + UIUtils.S(8), _toggleItemRowsButton.Width, _toggleItemRowsButton.Height);
-                _emptyIcon.SetBounds((width - 280) / 2, rowsTop + UIUtils.S(16), 64, 58);
-                _emptyText.SetBounds(_emptyIcon.Right + 8, _emptyIcon.Top + 2, 260, 30);
-                _emptyHint.SetBounds(_emptyIcon.Right + 8, _emptyText.Bottom + 2, 320, 24);
+                _itemRowsHost.SetBounds(side, rowsTop, width - side * 2, rowsHeight);
+                _toggleItemRowsButton.SetBounds(width - side - _toggleItemRowsButton.Width, rowsTop + rowsHeight + UIUtils.S(8), _toggleItemRowsButton.Width, _toggleItemRowsButton.Height);
+                _emptyIcon.SetBounds((width - UIUtils.S(280)) / 2, rowsTop + UIUtils.S(16), UIUtils.S(64), UIUtils.S(58));
+                _emptyText.SetBounds(_emptyIcon.Right + UIUtils.S(8), _emptyIcon.Top + UIUtils.S(2), UIUtils.S(260), UIUtils.S(30));
+                _emptyHint.SetBounds(_emptyIcon.Right + UIUtils.S(8), _emptyText.Bottom + UIUtils.S(2), UIUtils.S(320), UIUtils.S(24));
                 int desiredHeight = rowsTop + rowsHeight + (_toggleItemRowsButton.Visible ? UIUtils.S(52) : UIUtils.S(20));
                 if (_listCard.Height != desiredHeight)
                     _listCard.Height = desiredHeight;
@@ -419,18 +424,11 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         private static void LayoutListHeader(Control panel)
         {
-            int width = Math.Max(1, panel.ClientSize.Width);
-            int actionWidth = 220;
-            int timeWidth = 120;
-            int summaryWidth = 260;
-            int priceWidth = Math.Max(280, width - actionWidth - timeWidth - summaryWidth - 36);
-            int x = 20;
-            panel.Controls[0].SetBounds(x, 0, priceWidth, panel.Height);
-            x += priceWidth;
-            panel.Controls[1].SetBounds(x, 0, timeWidth, panel.Height);
-            x += timeWidth;
-            panel.Controls[2].SetBounds(x, 0, summaryWidth, panel.Height);
-            panel.Controls[3].SetBounds(width - actionWidth, 0, actionWidth - UIUtils.S(20), panel.Height);
+            ItemMonitorListColumnLayout layout = ItemMonitorRedesignPageModel.BuildListColumnLayout(panel.ClientSize.Width);
+            panel.Controls[0].SetBounds(layout.PriceLeft, 0, layout.PriceWidth, panel.Height);
+            panel.Controls[1].SetBounds(layout.TimeLeft, 0, layout.TimeWidth, panel.Height);
+            panel.Controls[2].SetBounds(layout.SummaryLeft, 0, layout.SummaryWidth, panel.Height);
+            panel.Controls[3].SetBounds(layout.ActionLeft, 0, layout.ActionWidth, panel.Height);
         }
 
         private void LayoutCards()
@@ -442,7 +440,7 @@ namespace CS2TradeMonitor.src.UI.Framework
             _searchCard.Width = width;
             _searchCard.Location = new Point(bounds.Left, bounds.Top);
             _listCard.Width = width;
-            _listCard.Location = new Point(bounds.Left, _searchCard.Bottom + 16);
+            _listCard.Location = new Point(bounds.Left, _searchCard.Bottom + UIUtils.S(16));
             _listCard.PerformLayout();
             FrameworkSettingsPageLayoutHelper.HideHorizontalScroll(_container);
         }
@@ -450,20 +448,21 @@ namespace CS2TradeMonitor.src.UI.Framework
         private void LayoutSearchCard()
         {
             int width = Math.Max(1, _searchCard.ClientSize.Width);
-            _searchCard.Controls[0].SetBounds(24, 18, 260, 34);
-            _searchCard.Controls[1].SetBounds(24, 56, width - 48, 26);
+            _searchCard.Controls[0].SetBounds(UIUtils.S(24), UIUtils.S(18), UIUtils.S(260), UIUtils.S(34));
+            _searchCard.Controls[1].SetBounds(UIUtils.S(24), UIUtils.S(56), width - UIUtils.S(48), UIUtils.S(26));
 
-            int rowY = 90;
-            int gap = 14;
-            int right = width - 24;
-            _clearButton.SetBounds(right - 96, rowY, 96, 42);
-            _statusLabel.SetBounds(_clearButton.Left - 166, rowY + 6, 152, 30);
-            _addButton.SetBounds(_statusLabel.Left - gap - 96, rowY, 96, 42);
-            _keywordInput.SetBounds(102, rowY, Math.Max(280, _addButton.Left - gap - 102), 42);
-            _searchCard.Controls.Cast<Control>().First(control => control.Text == "关键字").SetBounds(24, rowY + 9, 68, 28);
+            ItemMonitorSearchLayout layout = ItemMonitorRedesignPageModel.BuildSearchRowLayout(width);
+            _clearButton.Bounds = layout.ClearButtonBounds;
+            _statusLabel.Bounds = layout.StatusBounds;
+            _addButton.Bounds = layout.AddButtonBounds;
+            _keywordInput.Bounds = layout.KeywordInputBounds;
+            _searchCard.Controls.Cast<Control>().First(control => control.Text == "关键字").Bounds = layout.KeywordLabelBounds;
 
-            _candidateList.SetBounds(_keywordInput.Left, _keywordInput.Bottom + 4, _keywordInput.Width, 112);
-            _searchCard.Height = _candidateList.Visible ? ItemMonitorRedesignPageModel.SearchCardExpandedHeight : ItemMonitorRedesignPageModel.SearchCardHeight;
+            _candidateList.SetBounds(_keywordInput.Left, _keywordInput.Bottom + UIUtils.S(4), _keywordInput.Width, UIUtils.S(112));
+            _searchCard.Height = UIUtils.S(
+                _candidateList.Visible
+                    ? ItemMonitorRedesignPageModel.SearchCardExpandedHeight
+                    : ItemMonitorRedesignPageModel.SearchCardHeight);
             LayoutCards();
         }
 
@@ -527,7 +526,7 @@ namespace CS2TradeMonitor.src.UI.Framework
 
                     row.SetBounds(0, y, _itemRowsHost.Width, row.Height);
                     desiredRows.Add(row);
-                    y += row.Height + 8;
+                    y += row.Height + UIUtils.S(8);
                 }
 
                 for (int i = 0; i < desiredRows.Count; i++)
@@ -538,7 +537,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                     _itemRowsHost.Controls.SetChildIndex(row, i);
                 }
 
-                _itemRowsHost.Height = empty ? 0 : Math.Max(58, y - 8);
+                _itemRowsHost.Height = empty ? 0 : Math.Max(UIUtils.S(58), y - UIUtils.S(8));
             }
             finally
             {
@@ -562,15 +561,18 @@ namespace CS2TradeMonitor.src.UI.Framework
             var row = new RedesignCardPanel(UIColors.InputBg, radius: 4)
             {
                 Padding = Padding.Empty,
-                Height = expanded ? ItemMonitorRedesignPageModel.ExpandedItemRowHeight : ItemMonitorRedesignPageModel.CollapsedItemRowHeight
+                Height = UIUtils.S(
+                    expanded
+                        ? ItemMonitorRedesignPageModel.ExpandedItemRowHeight
+                        : ItemMonitorRedesignPageModel.CollapsedItemRowHeight)
             };
             var title = CreateLabel(item.Name, UIFonts.Bold(9.5f), UIColors.TextMain, ContentAlignment.MiddleLeft);
             var status = CreateLabel(ItemMonitorPageModel.BuildCompactPriceText(item), UIFonts.Regular(8.5f), ItemMonitorPageModel.GetItemStatusColor(item), ContentAlignment.MiddleLeft);
             var refreshTime = CreatePillLabel(ItemMonitorPageModel.BuildLastRefreshShortText(item), ResolveRefreshBadgeKind(item));
             var summary = CreateLabel(ItemMonitorPageModel.BuildCompactConfigSummary(item), UIFonts.Regular(8.2f), UIColors.TextMain, ContentAlignment.MiddleLeft);
             var detail = CreateLabel(ItemMonitorPageModel.BuildCompactConfigDetail(item), UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
-            var configure = new LiteButton(expanded ? "配置 ▲" : "配置 ▼", false) { Width = 108, Height = 32 };
-            var delete = new LiteButton("删除", false) { Width = 72, Height = 32 };
+            var configure = new LiteButton(expanded ? "配置 ▲" : "配置 ▼", false) { Width = UIUtils.S(96), Height = UIUtils.S(32) };
+            var delete = new LiteButton("删除", false) { Width = UIUtils.S(64), Height = UIUtils.S(32) };
             configure.Click += (_, __) => ToggleItemConfig(item);
             delete.Click += (_, __) => DeleteItem(item);
             row.Controls.Add(title);
@@ -585,27 +587,27 @@ namespace CS2TradeMonitor.src.UI.Framework
             row.Layout += (_, __) =>
             {
                 int width = Math.Max(1, row.ClientSize.Width);
-                int actionWidth = 220;
-                int timeWidth = 120;
-                int summaryWidth = 260;
-                int priceWidth = Math.Max(280, width - actionWidth - timeWidth - summaryWidth - 36);
-                int x = 20;
-                title.SetBounds(x, 7, priceWidth - 12, 24);
-                status.SetBounds(x, 31, priceWidth - 12, 20);
-                x += priceWidth;
-                refreshTime.SetBounds(x, 20, UIUtils.S(58), 24);
-                x += timeWidth;
-                summary.SetBounds(x, 9, summaryWidth - 12, 21);
-                detail.SetBounds(x, 31, summaryWidth - 12, 19);
-                int configureWidth = 108;
-                int deleteWidth = 72;
-                delete.SetBounds(row.Width - 16 - deleteWidth, 13, deleteWidth, 32);
-                configure.SetBounds(delete.Left - 10 - configureWidth, 13, configureWidth, 32);
+                ItemMonitorListColumnLayout layout = ItemMonitorRedesignPageModel.BuildListColumnLayout(width);
+                title.SetBounds(layout.PriceLeft, UIUtils.S(7), Math.Max(1, layout.PriceWidth - UIUtils.S(12)), UIUtils.S(24));
+                status.SetBounds(layout.PriceLeft, UIUtils.S(31), Math.Max(1, layout.PriceWidth - UIUtils.S(12)), UIUtils.S(20));
+                int refreshWidth = Math.Min(UIUtils.S(68), layout.TimeWidth);
+                refreshTime.SetBounds(
+                    layout.TimeLeft + Math.Max(0, (layout.TimeWidth - refreshWidth) / 2),
+                    UIUtils.S(17),
+                    Math.Max(1, refreshWidth),
+                    UIUtils.S(24));
+                summary.SetBounds(layout.SummaryLeft, UIUtils.S(9), Math.Max(1, layout.SummaryWidth - UIUtils.S(12)), UIUtils.S(21));
+                detail.SetBounds(layout.SummaryLeft, UIUtils.S(31), Math.Max(1, layout.SummaryWidth - UIUtils.S(12)), UIUtils.S(19));
+                int actionGap = UIUtils.S(10);
+                int actionContentWidth = configure.Width + actionGap + delete.Width;
+                int actionX = layout.ActionLeft + Math.Max(0, (layout.ActionWidth - actionContentWidth) / 2);
+                configure.SetBounds(actionX, UIUtils.S(13), configure.Width, UIUtils.S(32));
+                delete.SetBounds(configure.Right + actionGap, UIUtils.S(13), delete.Width, UIUtils.S(32));
                 foreach (Control child in row.Controls)
                 {
                     if (child.Tag as string == "ConfigStrip")
                     {
-                        child.SetBounds(20, 76, width - 40, 104);
+                        child.SetBounds(UIUtils.S(20), UIUtils.S(76), width - UIUtils.S(40), UIUtils.S(104));
                         child.PerformLayout();
                     }
                 }
@@ -691,10 +693,10 @@ namespace CS2TradeMonitor.src.UI.Framework
             var interval = CreateCompactNumberInput(item.RefreshIntervalSec.ToString(CultureInfo.InvariantCulture), "秒", 5);
             ItemPriceAlertTriggerMode mode = ItemMonitorPageModel.ResolveTriggerMode(item);
             var modeLabel = CreateLabel("模式", UIFonts.Regular(8.2f), UIColors.TextSub, ContentAlignment.MiddleLeft);
-            var percentMode = new LiteButton("百分比模式", false) { Width = 116, Height = 24, IsActive = mode == ItemPriceAlertTriggerMode.Percent };
-            var breakthroughMode = new LiteButton("价格模式", false) { Width = 88, Height = 24, IsActive = mode == ItemPriceAlertTriggerMode.Breakthrough };
-            var restore = new LiteButton("恢复初始值", false) { Width = 116, Height = 26 };
-            var save = new LiteButton("保存", true) { Width = 72, Height = 26 };
+            var percentMode = new LiteButton("百分比模式", false) { Width = UIUtils.S(116), Height = UIUtils.S(24), IsActive = mode == ItemPriceAlertTriggerMode.Percent };
+            var breakthroughMode = new LiteButton("价格模式", false) { Width = UIUtils.S(88), Height = UIUtils.S(24), IsActive = mode == ItemPriceAlertTriggerMode.Breakthrough };
+            var restore = new LiteButton("恢复初始值", false) { Width = UIUtils.S(116), Height = UIUtils.S(26) };
+            var save = new LiteButton("保存", true) { Width = UIUtils.S(72), Height = UIUtils.S(26) };
             percentMode.Font = UIFonts.Regular(8f);
             breakthroughMode.Font = UIFonts.Regular(8f);
             restore.Font = UIFonts.Regular(8f);
@@ -777,40 +779,40 @@ namespace CS2TradeMonitor.src.UI.Framework
             strip.Layout += (_, __) =>
             {
                 int w = Math.Max(1, strip.ClientSize.Width);
-                int y1 = 8;
-                int y2 = 40;
-                int y3 = 72;
-                save.SetBounds(w - 88, y1 - 1, 72, 26);
-                restore.SetBounds(save.Left - 124, y1 - 1, 116, 26);
+                int y1 = UIUtils.S(8);
+                int y2 = UIUtils.S(40);
+                int y3 = UIUtils.S(72);
+                save.SetBounds(w - UIUtils.S(88), y1 - UIUtils.S(1), UIUtils.S(72), UIUtils.S(26));
+                restore.SetBounds(save.Left - UIUtils.S(124), y1 - UIUtils.S(1), UIUtils.S(116), UIUtils.S(26));
 
-                int x1 = 10;
-                desktopAlertLabel.SetBounds(x1, y1 + 1, 68, 22);
-                desktopAlertCheck.SetBounds(desktopAlertLabel.Right + 2, y1, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
-                x1 = desktopAlertCheck.Right + 8;
-                phoneAlertLabel.SetBounds(x1, y1 + 1, 68, 22);
-                phoneAlertCheck.SetBounds(phoneAlertLabel.Right + 2, y1, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
-                x1 = phoneAlertCheck.Right + 10;
-                refreshLabel.SetBounds(x1, y1 + 1, 68, 22);
-                interval.SetBounds(refreshLabel.Right + 2, y1 - 1, 50, 26);
+                int x1 = UIUtils.S(10);
+                desktopAlertLabel.SetBounds(x1, y1 + UIUtils.S(1), UIUtils.S(68), UIUtils.S(22));
+                desktopAlertCheck.SetBounds(desktopAlertLabel.Right + UIUtils.S(2), y1, UIUtils.S(ItemMonitorRedesignPageModel.ConfigStripCheckWidth), UIUtils.S(22));
+                x1 = desktopAlertCheck.Right + UIUtils.S(8);
+                phoneAlertLabel.SetBounds(x1, y1 + UIUtils.S(1), UIUtils.S(68), UIUtils.S(22));
+                phoneAlertCheck.SetBounds(phoneAlertLabel.Right + UIUtils.S(2), y1, UIUtils.S(ItemMonitorRedesignPageModel.ConfigStripCheckWidth), UIUtils.S(22));
+                x1 = phoneAlertCheck.Right + UIUtils.S(10);
+                refreshLabel.SetBounds(x1, y1 + UIUtils.S(1), UIUtils.S(68), UIUtils.S(22));
+                interval.SetBounds(refreshLabel.Right + UIUtils.S(2), y1 - UIUtils.S(1), UIUtils.S(50), UIUtils.S(26));
 
-                int x2 = 10;
-                desktopDisplayLabel.SetBounds(x2, y2 + 1, 68, 22);
-                desktopDisplayCheck.SetBounds(desktopDisplayLabel.Right + 2, y2, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
-                x2 = desktopDisplayCheck.Right + 8;
-                taskbarDisplayLabel.SetBounds(x2, y2 + 1, ItemMonitorRedesignPageModel.ConfigStripTaskbarDisplayLabelWidth, 22);
-                taskbarDisplayCheck.SetBounds(taskbarDisplayLabel.Right + 2, y2, ItemMonitorRedesignPageModel.ConfigStripCheckWidth, 22);
-                x2 = taskbarDisplayCheck.Right + 12;
-                modeLabel.SetBounds(x2, y2 + 1, 44, 22);
-                percentMode.SetBounds(modeLabel.Right + 2, y2, 116, 24);
-                breakthroughMode.SetBounds(percentMode.Right + 4, y2, 88, 24);
+                int x2 = UIUtils.S(10);
+                desktopDisplayLabel.SetBounds(x2, y2 + UIUtils.S(1), UIUtils.S(68), UIUtils.S(22));
+                desktopDisplayCheck.SetBounds(desktopDisplayLabel.Right + UIUtils.S(2), y2, UIUtils.S(ItemMonitorRedesignPageModel.ConfigStripCheckWidth), UIUtils.S(22));
+                x2 = desktopDisplayCheck.Right + UIUtils.S(8);
+                taskbarDisplayLabel.SetBounds(x2, y2 + UIUtils.S(1), UIUtils.S(ItemMonitorRedesignPageModel.ConfigStripTaskbarDisplayLabelWidth), UIUtils.S(22));
+                taskbarDisplayCheck.SetBounds(taskbarDisplayLabel.Right + UIUtils.S(2), y2, UIUtils.S(ItemMonitorRedesignPageModel.ConfigStripCheckWidth), UIUtils.S(22));
+                x2 = taskbarDisplayCheck.Right + UIUtils.S(12);
+                modeLabel.SetBounds(x2, y2 + UIUtils.S(1), UIUtils.S(44), UIUtils.S(22));
+                percentMode.SetBounds(modeLabel.Right + UIUtils.S(2), y2, UIUtils.S(116), UIUtils.S(24));
+                breakthroughMode.SetBounds(percentMode.Right + UIUtils.S(4), y2, UIUtils.S(88), UIUtils.S(24));
 
-                firstTitle.SetBounds(18, y3 + 1, ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth, 22);
-                firstInput.SetBounds(firstTitle.Right + 4, y3 - 1, 58, 26);
-                secondTitle.SetBounds(firstInput.Right + 12, y3 + 1, ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth, 22);
-                secondInput.SetBounds(secondTitle.Right + 4, y3 - 1, 58, 26);
-                unitTitle.SetBounds(secondInput.Right + 12, y3 + 1, 68, 22);
-                unitTime.SetBounds(unitTitle.Right + 4, y3 - 1, 52, 26);
-                modeHint.SetBounds(unitTime.Right + 14, y3 + 1, Math.Max(140, w - unitTime.Right - 34), 22);
+                firstTitle.SetBounds(UIUtils.S(18), y3 + UIUtils.S(1), UIUtils.S(ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth), UIUtils.S(22));
+                firstInput.SetBounds(firstTitle.Right + UIUtils.S(4), y3 - UIUtils.S(1), UIUtils.S(58), UIUtils.S(26));
+                secondTitle.SetBounds(firstInput.Right + UIUtils.S(12), y3 + UIUtils.S(1), UIUtils.S(ItemMonitorRedesignPageModel.ConfigStripValueLabelWidth), UIUtils.S(22));
+                secondInput.SetBounds(secondTitle.Right + UIUtils.S(4), y3 - UIUtils.S(1), UIUtils.S(58), UIUtils.S(26));
+                unitTitle.SetBounds(secondInput.Right + UIUtils.S(12), y3 + UIUtils.S(1), UIUtils.S(68), UIUtils.S(22));
+                unitTime.SetBounds(unitTitle.Right + UIUtils.S(4), y3 - UIUtils.S(1), UIUtils.S(52), UIUtils.S(26));
+                modeHint.SetBounds(unitTime.Right + UIUtils.S(14), y3 + UIUtils.S(1), Math.Max(UIUtils.S(140), w - unitTime.Right - UIUtils.S(34)), UIUtils.S(22));
             };
             row.Controls.Add(strip);
         }
@@ -1267,7 +1269,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         {
             return new RedesignCardPanel(UIColors.CardBg)
             {
-                Height = height,
+                Height = UIUtils.S(height),
                 Padding = Padding.Empty
             };
         }
@@ -1389,12 +1391,90 @@ namespace CS2TradeMonitor.src.UI.Framework
         public const int ConfigStripCheckWidth = 26;
         public const int ConfigStripTaskbarDisplayLabelWidth = 88;
 
+        public static ItemMonitorSearchLayout BuildSearchRowLayout(int cardWidth)
+        {
+            int side = UIUtils.S(24);
+            int rowY = UIUtils.S(90);
+            int gap = UIUtils.S(14);
+            int buttonWidth = UIUtils.S(96);
+            int rowHeight = UIUtils.S(42);
+            int inputLeft = UIUtils.S(102);
+            int clearLeft = Math.Max(inputLeft, cardWidth - side - buttonWidth);
+            int availableForInputAndStatus = Math.Max(
+                2,
+                clearLeft - inputLeft - buttonWidth - gap * 3);
+            int statusWidth = Math.Min(
+                UIUtils.S(152),
+                Math.Max(1, availableForInputAndStatus - UIUtils.S(180)));
+            int inputWidth = Math.Max(1, availableForInputAndStatus - statusWidth);
+
+            var inputBounds = new Rectangle(inputLeft, rowY, inputWidth, rowHeight);
+            var addButtonBounds = new Rectangle(inputBounds.Right + gap, rowY, buttonWidth, rowHeight);
+            var statusBounds = new Rectangle(
+                addButtonBounds.Right + gap,
+                rowY + UIUtils.S(6),
+                statusWidth,
+                UIUtils.S(30));
+            var clearButtonBounds = new Rectangle(statusBounds.Right + gap, rowY, buttonWidth, rowHeight);
+
+            return new ItemMonitorSearchLayout(
+                new Rectangle(side, rowY + UIUtils.S(9), UIUtils.S(68), UIUtils.S(28)),
+                inputBounds,
+                addButtonBounds,
+                statusBounds,
+                clearButtonBounds);
+        }
+
+        public static ItemMonitorListColumnLayout BuildListColumnLayout(int rowWidth)
+        {
+            int side = UIUtils.S(20);
+            int available = Math.Max(1, rowWidth - side * 2);
+            int actionWidth = Math.Min(UIUtils.S(190), available);
+            int remaining = Math.Max(0, available - actionWidth);
+            int timeWidth = Math.Min(UIUtils.S(100), remaining);
+            remaining -= timeWidth;
+            int summaryWidth = Math.Min(UIUtils.S(200), remaining);
+            remaining -= summaryWidth;
+            int priceWidth = Math.Max(1, remaining);
+
+            int priceLeft = side;
+            int timeLeft = priceLeft + priceWidth;
+            int summaryLeft = timeLeft + timeWidth;
+            int actionLeft = summaryLeft + summaryWidth;
+            return new ItemMonitorListColumnLayout(
+                priceLeft,
+                priceWidth,
+                timeLeft,
+                timeWidth,
+                summaryLeft,
+                summaryWidth,
+                actionLeft,
+                actionWidth);
+        }
+
         public static int GetVisibleItemRowCount(int totalCount, bool showAll)
         {
             totalCount = Math.Max(0, totalCount);
             return showAll ? totalCount : Math.Min(totalCount, InitialVisibleItemRows);
         }
     }
+
+    internal readonly record struct ItemMonitorListColumnLayout(
+        int PriceLeft,
+        int PriceWidth,
+        int TimeLeft,
+        int TimeWidth,
+        int SummaryLeft,
+        int SummaryWidth,
+        int ActionLeft,
+        int ActionWidth);
+
+    internal readonly record struct ItemMonitorSearchLayout(
+        Rectangle KeywordLabelBounds,
+        Rectangle KeywordInputBounds,
+        Rectangle AddButtonBounds,
+        Rectangle StatusBounds,
+        Rectangle ClearButtonBounds);
 
     internal sealed class CompactPillLabel : Control
     {
@@ -1416,33 +1496,12 @@ namespace CS2TradeMonitor.src.UI.Framework
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            Color fill;
-            Color border;
-            Color text;
-            switch (_kind)
-            {
-                case "fresh":
-                    fill = Color.FromArgb(16, 37, 31);
-                    border = Color.FromArgb(29, 104, 87);
-                    text = Color.FromArgb(34, 211, 166);
-                    break;
-                case "cache":
-                    fill = Color.FromArgb(23, 31, 42);
-                    border = UIColors.Border;
-                    text = UIColors.TextSub;
-                    break;
-                default:
-                    fill = Color.FromArgb(17, 21, 27);
-                    border = Color.FromArgb(38, 49, 61);
-                    text = UIColors.TextDisabled;
-                    break;
-            }
+            CompactPillPalette palette = ResolvePalette(_kind, UIColors.IsDark);
 
             Rectangle rect = new(0, 0, Width - 1, Height - 1);
             using var path = CreateRoundPath(rect, Math.Max(1, rect.Height / 2));
-            using var fillBrush = new SolidBrush(fill);
-            using var borderPen = new Pen(border);
-            using var textBrush = new SolidBrush(text);
+            using var fillBrush = new SolidBrush(palette.Fill);
+            using var borderPen = new Pen(palette.Border);
             e.Graphics.FillPath(fillBrush, path);
             e.Graphics.DrawPath(borderPen, path);
             TextRenderer.DrawText(
@@ -1450,8 +1509,46 @@ namespace CS2TradeMonitor.src.UI.Framework
                 Text,
                 Font,
                 rect,
-                text,
+                palette.Text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+
+        internal static CompactPillPalette ResolvePalette(string kind, bool darkMode)
+        {
+            if (darkMode)
+            {
+                return kind switch
+                {
+                    "fresh" => new CompactPillPalette(
+                        Color.FromArgb(16, 37, 31),
+                        Color.FromArgb(29, 104, 87),
+                        Color.FromArgb(34, 211, 166)),
+                    "cache" => new CompactPillPalette(
+                        Color.FromArgb(23, 31, 42),
+                        Color.FromArgb(48, 57, 69),
+                        Color.FromArgb(184, 192, 204)),
+                    _ => new CompactPillPalette(
+                        Color.FromArgb(17, 21, 27),
+                        Color.FromArgb(38, 49, 61),
+                        Color.FromArgb(160, 170, 184))
+                };
+            }
+
+            return kind switch
+            {
+                "fresh" => new CompactPillPalette(
+                    Color.FromArgb(230, 249, 244),
+                    Color.FromArgb(96, 196, 167),
+                    Color.FromArgb(0, 112, 86)),
+                "cache" => new CompactPillPalette(
+                    Color.FromArgb(235, 241, 248),
+                    Color.FromArgb(170, 185, 202),
+                    Color.FromArgb(55, 72, 90)),
+                _ => new CompactPillPalette(
+                    Color.FromArgb(241, 243, 246),
+                    Color.FromArgb(198, 207, 218),
+                    Color.FromArgb(82, 96, 112))
+            };
         }
 
         private static System.Drawing.Drawing2D.GraphicsPath CreateRoundPath(Rectangle rect, int radius)
@@ -1466,4 +1563,6 @@ namespace CS2TradeMonitor.src.UI.Framework
             return path;
         }
     }
+
+    internal readonly record struct CompactPillPalette(Color Fill, Color Border, Color Text);
 }

@@ -662,9 +662,9 @@ namespace CS2TradeMonitor.src.UI.Framework
             try
             {
                 int refreshSec = DataPageModel.NormalizeMarketRefreshValue(Get(SettingsKeys.CsqaqRefreshSec, Settings.DefaultMarketRefreshSec));
-                await _csqaqService.TestAndUpdateAsync(token, refreshSec);
+                bool refreshed = await _csqaqService.TestAndUpdateAsync(token, refreshSec);
                 var data = _csqaqService.Latest;
-                if (data != null && !data.IsStale)
+                if (refreshed && data != null && !data.IsStale)
                 {
                     SetLabel(_csqaqResultLabel, $"连接成功  来源: {DataPageModel.NormalizeSourceText(data.Source, "公开接口")}  指数: {data.FormatIndex()}  {data.FormatRate()}", UIColors.Positive);
                 }
@@ -676,7 +676,10 @@ namespace CS2TradeMonitor.src.UI.Framework
                 }
                 else
                 {
-                    SetLabel(_csqaqResultLabel, "尚未刷新成功：点击顶部“立即刷新”或检查 API", UIColors.TextCrit);
+                    string reason = AppActions.SanitizeError(_csqaqService.LastError);
+                    SetLabel(_csqaqResultLabel, string.IsNullOrWhiteSpace(reason)
+                        ? "尚未取得新数据，请等待当前刷新完成后重试。"
+                        : $"刷新失败：{reason}", UIColors.TextCrit);
                 }
             }
             catch (Exception ex)

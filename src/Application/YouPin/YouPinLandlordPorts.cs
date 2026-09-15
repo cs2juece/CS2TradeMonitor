@@ -104,7 +104,12 @@ namespace CS2TradeMonitor.Application.YouPin
         bool IsCanSold,
         decimal SellPrice);
 
-    internal sealed record YouPinLandlordWriteResult(bool Success, string Message);
+    internal sealed record YouPinLandlordWriteResult(bool Success, string Message)
+    {
+        public bool Submitted { get; init; } = true;
+
+        public bool RequiresManualReview { get; init; }
+    }
 
     internal sealed record YouPinLandlordRemoteInventoryItem(
         string AssetId,

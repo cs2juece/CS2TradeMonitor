@@ -2,6 +2,7 @@ using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Steam.Auth;
 using CS2TradeMonitor.Application.Steam.Auth.Import;
 using CS2TradeMonitor.Domain.Steam;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -65,7 +66,7 @@ namespace CS2TradeMonitor.Application.Steam
 
                 var credential = parsed.Credential;
                 _authStore.Save(credential);
-                SteamOfferAuditLog.LogImportToken(credential.SteamId, SteamMaFileImportPreparer.ClassifySource(prepared.SourcePath));
+                SteamOfferPlatform.Host.LogImportToken(credential.SteamId, SteamMaFileImportPreparer.ClassifySource(prepared.SourcePath));
                 _raiseDataUpdated();
                 return SteamOfferActionResult.Success(
                     string.IsNullOrWhiteSpace(prepared.Message) || prepared.Message.StartsWith("已读取", StringComparison.Ordinal)
@@ -78,7 +79,7 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                return SteamOfferActionResult.Failed("导入失败：" + SteamOfferAuditLog.RedactSecrets(ex.Message));
+                return SteamOfferActionResult.Failed("导入失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message));
             }
         }
 
@@ -97,7 +98,7 @@ namespace CS2TradeMonitor.Application.Steam
             }
             catch (Exception ex)
             {
-                return SteamOfferImportFileResult.Failed("读取文件失败：" + SteamOfferAuditLog.RedactSecrets(ex.Message), sourcePath);
+                return SteamOfferImportFileResult.Failed("读取文件失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message), sourcePath);
             }
         }
 
@@ -117,6 +118,14 @@ namespace CS2TradeMonitor.Application.Steam
             accessToken = (accessToken ?? "").Trim();
             refreshToken = (refreshToken ?? "").Trim();
             steamId = (steamId ?? "").Trim();
+            accessToken = SteamLoginTokenTextParser.FirstText(
+                accessToken,
+                SteamLoginTokenTextParser.TryGetAccessTokenFromSteamLoginSecure(steamLoginSecure));
+            steamId = SteamLoginTokenTextParser.FirstText(
+                steamId,
+                SteamLoginTokenTextParser.TryGetSteamIdFromSteamLoginSecure(steamLoginSecure),
+                SteamLoginTokenTextParser.TryGetSteamIdFromJwt(accessToken),
+                SteamLoginTokenTextParser.TryGetSteamIdFromJwt(refreshToken));
             if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(steamLoginSecure))
             {
                 var missing = new List<string>();

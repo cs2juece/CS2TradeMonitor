@@ -1,6 +1,8 @@
 using CS2TradeMonitor.Domain.Market;
+using CS2TradeMonitor.src.Core;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Globalization;
 using System.Linq;
 
@@ -68,7 +70,45 @@ namespace CS2TradeMonitor.src.UI.Framework
             string source = string.IsNullOrWhiteSpace(candidate.Source) ? "来源未知" : candidate.Source.Trim();
             return $"{name}    {price} / {source}";
         }
+
+        public static YouPinStopProfitLossStatusPanelLayout BuildStatusPanelLayout(Rectangle contentBounds, int buttonHeight)
+        {
+            int desiredGap = UIUtils.S(12);
+            int buttonWidth = Math.Min(UIUtils.S(128), Math.Max(1, contentBounds.Width / 4));
+            int gap = Math.Min(
+                desiredGap,
+                Math.Max(0, (contentBounds.Width - buttonWidth - 4) / 4));
+            int tilesWidth = Math.Max(4, contentBounds.Width - buttonWidth - gap * 4);
+            int tileWidth = Math.Max(1, tilesWidth / 4);
+            int lastTileWidth = Math.Max(1, tilesWidth - tileWidth * 3);
+            int x = contentBounds.Left;
+            var enabledTile = new Rectangle(x, contentBounds.Top, tileWidth, contentBounds.Height);
+            x = enabledTile.Right + gap;
+            var stateTile = new Rectangle(x, contentBounds.Top, tileWidth, contentBounds.Height);
+            x = stateTile.Right + gap;
+            var scanTile = new Rectangle(x, contentBounds.Top, tileWidth, contentBounds.Height);
+            x = scanTile.Right + gap;
+            var alertTile = new Rectangle(x, contentBounds.Top, lastTileWidth, contentBounds.Height);
+            var scanButton = new Rectangle(
+                contentBounds.Right - buttonWidth,
+                contentBounds.Top + Math.Max(0, (contentBounds.Height - buttonHeight) / 2),
+                buttonWidth,
+                Math.Min(buttonHeight, contentBounds.Height));
+            return new YouPinStopProfitLossStatusPanelLayout(
+                enabledTile,
+                stateTile,
+                scanTile,
+                alertTile,
+                scanButton);
+        }
     }
+
+    internal readonly record struct YouPinStopProfitLossStatusPanelLayout(
+        Rectangle EnabledTileBounds,
+        Rectangle StateTileBounds,
+        Rectangle ScanTileBounds,
+        Rectangle AlertTileBounds,
+        Rectangle ScanButtonBounds);
 
     internal sealed class SpecifiedCandidateListItem
     {

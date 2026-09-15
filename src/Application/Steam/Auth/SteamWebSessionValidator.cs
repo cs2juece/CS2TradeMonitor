@@ -1,4 +1,4 @@
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 using System;
 using System.Net;
 using System.Net.Http;
@@ -71,7 +71,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             }
             catch (Exception ex)
             {
-                return SteamSessionValidationResult.ProtocolUnexpected(DiagnosticsLogger.Redact(ex.Message));
+                return SteamSessionValidationResult.ProtocolUnexpected(SteamOfferPlatform.Host.RedactSecrets(ex.Message));
             }
         }
     }

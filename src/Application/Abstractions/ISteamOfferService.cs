@@ -1,8 +1,10 @@
 using CS2TradeMonitor.Application.Steam;
+using CS2TradeMonitor.Domain.Steam;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.Application.Abstractions
 {
-    public interface ISteamOfferService
+    public interface ISteamOfferService : IAutoConfirmationSteamGateway
     {
         event Action? DataUpdated;
 
@@ -13,6 +15,9 @@ namespace CS2TradeMonitor.Application.Abstractions
         Task SyncSteamTimeOffsetAsync();
 
         SteamOfferState GetState();
+
+        IReadOnlyList<SteamOfferItem> IAutoConfirmationSteamGateway.GetAutoTradeOffers()
+            => GetState().Offers;
 
         void StartAutoConfirm(int intervalSeconds, bool autoAcceptSafe, bool allowYouPinVerifiedAccept = true);
 
@@ -64,17 +69,9 @@ namespace CS2TradeMonitor.Application.Abstractions
 
         Task<SteamOfferActionResult> LoadOffersAsync(bool useMock = false, bool allowAutoRelogin = true);
 
-        Task<SteamOfferActionResult> LoadOffersForAutoTradeAsync();
-
         Task<SteamOfferActionResult> AcceptSafeOffersAsync(bool allowYouPinVerified = true);
 
         Task<SteamOfferActionResult> AcceptOfferAsync(string tradeOfferId, bool requireSafe);
-
-        Task<SteamOfferActionResult> AcceptAutoTradeOfferAsync(SteamAutoTradePlanItem plan);
-
-        Task<SteamOfferActionResult> ConfirmMatchedMobileTradeAsync(SteamAutoTradePlanItem plan);
-
-        Task<SteamTradeOfferStatusResult> QueryTradeOfferStatusAsync(string tradeOfferId);
 
         Task<SteamOfferActionResult> DenyOfferAsync(string tradeOfferId);
     }

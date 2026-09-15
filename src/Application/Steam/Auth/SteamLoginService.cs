@@ -11,7 +11,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 using static CS2TradeMonitor.Application.Steam.Auth.SteamLoginCookieHelper;
 using static CS2TradeMonitor.Application.Steam.Auth.SteamLoginCryptoSupport;
 using static CS2TradeMonitor.Application.Steam.Auth.SteamLoginHttpDiagnostics;
@@ -20,24 +20,56 @@ using static CS2TradeMonitor.Application.Steam.Auth.SteamLoginWebPageParser;
 
 namespace CS2TradeMonitor.Application.Steam.Auth
 {
+    public sealed record SteamLoginServiceDependencies(
+        ISteamAuthStore AuthStore,
+        ISteamTokenVault TokenVault,
+        ISteamRoutedHttpClientFactory HttpFactory,
+        ISteamOfferPlatformHost PlatformHost);
+
     public sealed class SteamLoginService : ISteamLoginService
     {
+        private static readonly object InstanceGate = new();
+        private static Func<SteamLoginServiceDependencies>? _platformFactory;
+        private static SteamLoginService? _instance;
         private readonly ISteamAuthStore _authStore;
         private readonly ISteamTokenVault _tokenVault;
         private readonly ISteamRoutedHttpClientFactory _httpFactory;
-        public static SteamLoginService Instance { get; } = new();
 
-        private SteamLoginService()
-            : this(SteamLoginRuntimeServices.Resolve())
+        public static SteamLoginService Instance
         {
+            get
+            {
+                lock (InstanceGate)
+                {
+                    if (_instance is not null)
+                        return _instance;
+                    if (_platformFactory is null)
+                        throw new InvalidOperationException("Steam 登录平台宿主尚未配置。");
+
+                    _instance = Create(_platformFactory());
+                    return _instance;
+                }
+            }
         }
 
-        internal SteamLoginService(SteamLoginRuntimeServices services)
-            : this(services.AuthStore, services.TokenVault, services.RoutedHttpFactory)
+        public static void ConfigurePlatform(Func<SteamLoginServiceDependencies> factory)
         {
+            ArgumentNullException.ThrowIfNull(factory);
+            lock (InstanceGate)
+            {
+                if (_instance is null)
+                    _platformFactory = factory;
+            }
         }
 
-        internal SteamLoginService(
+        public static SteamLoginService Create(SteamLoginServiceDependencies services)
+        {
+            ArgumentNullException.ThrowIfNull(services);
+            SteamOfferPlatform.Configure(services.PlatformHost);
+            return new SteamLoginService(services.AuthStore, services.TokenVault, services.HttpFactory);
+        }
+
+        public SteamLoginService(
             ISteamAuthStore authStore,
             ISteamTokenVault tokenVault,
             ISteamRoutedHttpClientFactory httpFactory)
@@ -91,7 +123,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             }
             catch (Exception ex)
             {
-                return SteamOfferActionResult.Failed("恢复 Steam 登录状态失败：" + DiagnosticsLogger.Redact(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
+                return SteamOfferActionResult.Failed("恢复 Steam 登录状态失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
             }
         }
 
@@ -144,7 +176,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             }
             catch (Exception ex)
             {
-                return SteamOfferActionResult.Failed("恢复 Steam 登录状态失败：" + DiagnosticsLogger.Redact(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
+                return SteamOfferActionResult.Failed("恢复 Steam 登录状态失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
             }
         }
 
@@ -200,7 +232,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             }
             catch (Exception ex)
             {
-                return SteamOfferActionResult.Failed("续期 Steam 会话失败：" + DiagnosticsLogger.Redact(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
+                return SteamOfferActionResult.Failed("续期 Steam 会话失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
             }
         }
 
@@ -246,7 +278,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             }
             catch (Exception ex)
             {
-                return SteamOfferActionResult.Failed("验证 Steam 登录状态失败：" + DiagnosticsLogger.Redact(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
+                return SteamOfferActionResult.Failed("验证 Steam 登录状态失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
             }
         }
 
@@ -406,7 +438,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
                 string apiStatus = string.IsNullOrWhiteSpace(apiKey)
                     ? "API Key 未获取，不影响报价登录状态。"
                     : "API Key 已获取。";
-                return SteamOfferActionResult.Success($"Steam 登录状态已保存。SteamID：{SteamAuthSecureStore.MaskSteamId(steamId)}；{apiStatus}");
+                return SteamOfferActionResult.Success($"Steam 登录状态已保存。SteamID：{SteamCredentialMasker.MaskSteamId(steamId)}；{apiStatus}");
             }
             catch (SteamLoginException ex)
             {
@@ -426,7 +458,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             }
             catch (Exception ex)
             {
-                return SteamOfferActionResult.Failed("Steam 登录失败：" + DiagnosticsLogger.Redact(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
+                return SteamOfferActionResult.Failed("Steam 登录失败：" + SteamOfferPlatform.Host.RedactSecrets(ex.Message), SteamLoginFailureCategory.Unknown.ToString());
             }
         }
 
@@ -471,7 +503,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
             if (!finalizeResponse.IsSuccessStatusCode)
             {
                 string summary = SanitizeResponseSummary(finalizeText);
-                SteamOfferAuditLog.Error($"Steam finalizelogin failed. Host=login.steampowered.com; Status={(int)finalizeResponse.StatusCode}; Body={summary}");
+                SteamOfferPlatform.Host.Error($"Steam finalizelogin failed. Host=login.steampowered.com; Status={(int)finalizeResponse.StatusCode}; Body={summary}");
                 throw new SteamLoginException(SteamLoginFailureCategory.NetworkError, $"Steam finalizelogin HTTP {(int)finalizeResponse.StatusCode}。请稍后重试，或改用 Steam 网页登录。");
             }
 
@@ -511,7 +543,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
                     using var response = await SendWithDiagnosticsAsync(http, request, "TransferWebLogin", cancellationToken);
                     if (!response.IsSuccessStatusCode)
                     {
-                        SteamOfferAuditLog.InfoThrottled(
+                        SteamOfferPlatform.Host.InfoThrottled(
                             "steam-transfer-login-http",
                             $"Steam transfer login returned HTTP {(int)response.StatusCode}; retrying.",
                             TimeSpan.FromMinutes(10));
@@ -567,7 +599,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
                             $"Steam Web API Key 页面暂时不可用：HTTP {page.StatusCode}，Page={page.PageKind}。");
                     }
 
-                    SteamOfferAuditLog.InfoThrottled(
+                    SteamOfferPlatform.Host.InfoThrottled(
                         "steam-api-key-page-unavailable:" + page.PageKind,
                         $"Steam Web API key page unavailable. Status={page.StatusCode}; Page={page.PageKind}",
                         TimeSpan.FromMinutes(10));
@@ -584,14 +616,14 @@ namespace CS2TradeMonitor.Application.Steam.Auth
                             "Steam Web API Key 页面是登录页；请先重新登录 Steam。");
                     }
 
-                    SteamOfferAuditLog.InfoThrottled(
+                    SteamOfferPlatform.Host.InfoThrottled(
                         "steam-api-key-not-found:" + page.PageKind,
                         $"Steam Web API key page loaded but key was not found. Page={page.PageKind}",
                         TimeSpan.FromMinutes(10));
                     return "";
                 }
 
-                SteamOfferAuditLog.InfoThrottled(
+                SteamOfferPlatform.Host.InfoThrottled(
                     "steam-api-key-fetch-success",
                     "Steam Web API key fetched from saved session.",
                     TimeSpan.FromMinutes(10));

@@ -43,7 +43,7 @@ namespace CS2TradeMonitor.src.Core.Actions
             }
 
             Form settings = CreateSettingsWindow(cfg, ui, form, "MainPanel");
-            PrepareSettingsWindow(settings, form);
+            PrepareSettingsWindow(settings, form, modal);
             settings.Shown += (_, __) => SwitchSettingsMainPanelTab(settings, targetTab);
             if (modal)
             {
@@ -79,7 +79,7 @@ namespace CS2TradeMonitor.src.Core.Actions
             }
 
             Form settings = CreateSettingsWindow(cfg, ui, form, pageKey);
-            PrepareSettingsWindow(settings, form);
+            PrepareSettingsWindow(settings, form, modal);
             if (modal)
             {
                 using (settings)
@@ -110,9 +110,32 @@ namespace CS2TradeMonitor.src.Core.Actions
             return true;
         }
 
-        private static Form CreateSettingsWindow(Settings cfg, UIController ui, MainForm form, string initialPageKey = "MainPanel")
+        private static Form CreateSettingsWindow(
+            Settings cfg,
+            UIController ui,
+            MainForm form,
+            string initialPageKey = SettingsPageRegistry.DefaultRouteKey)
         {
-            return new SettingsForm(cfg, ui, form, initialPageKey, SettingsFormRuntimeServices.Resolve());
+            var settingsWindow = new SettingsForm(cfg, ui, form, initialPageKey, SettingsFormRuntimeServices.Resolve());
+            AttachSettingsWindowPresentation(settingsWindow, form);
+            return settingsWindow;
+        }
+
+        private static void AttachSettingsWindowPresentation(Form settingsWindow, MainForm owner)
+        {
+            bool released = false;
+            void ReleasePresentation()
+            {
+                if (released)
+                    return;
+
+                released = true;
+                owner.EndSettingsWindowPresentation();
+            }
+
+            owner.BeginSettingsWindowPresentation();
+            settingsWindow.FormClosed += (_, __) => ReleasePresentation();
+            settingsWindow.Disposed += (_, __) => ReleasePresentation();
         }
 
         private static Form? FindOpenSettingsWindow()
@@ -131,11 +154,11 @@ namespace CS2TradeMonitor.src.Core.Actions
             return form is SettingsForm;
         }
 
-        private static void PrepareSettingsWindow(Form settingsWindow, MainForm owner)
+        internal static void PrepareSettingsWindow(Form settingsWindow, Form owner, bool modal = false)
         {
-            settingsWindow.Owner = null;
-            // 主悬浮窗可能是 TopMost；设置窗必须跟随置顶层级，否则会被实际悬浮窗遮挡控件。
-            settingsWindow.TopMost = owner.TopMost;
+            settingsWindow.Owner = owner;
+            settingsWindow.TopMost = false;
+            settingsWindow.ShowInTaskbar = !modal;
         }
 
         private static void ActivateSettingsWindow(Form settingsWindow, MainForm owner)
@@ -280,9 +303,36 @@ namespace CS2TradeMonitor.src.Core.Actions
             ReloadTaskbarWindows();
         }
 
-        public static void ApplyAutoStart(Settings cfg)
+        public static bool ApplyAutoStart(Settings cfg)
         {
-            AutoStart.Set(cfg.AutoStart);
+            bool requested = cfg.AutoStart;
+            bool succeeded = AutoStart.Set(requested);
+            bool effective = ResolveAutoStartSetting(
+                requested,
+                succeeded,
+                AutoStart.IsEnabledForCurrentExe());
+
+            if (cfg.AutoStart != effective)
+            {
+                cfg.AutoStart = effective;
+                SettingsSaveResult saveResult = cfg.Save();
+                if (!saveResult.Succeeded)
+                {
+                    DiagnosticsLogger.Error(
+                        "AutoStart",
+                        $"Persisting reconciled auto-start setting failed. Type={saveResult.FailureType}; Stage={saveResult.FailureStage}");
+                }
+            }
+
+            return succeeded;
+        }
+
+        internal static bool ResolveAutoStartSetting(
+            bool requested,
+            bool operationSucceeded,
+            bool enabledForCurrentExe)
+        {
+            return operationSucceeded ? requested : enabledForCurrentExe;
         }
 
         // =============================================================
@@ -292,7 +342,6 @@ namespace CS2TradeMonitor.src.Core.Actions
         public static void ApplyWindowAttributes(Settings cfg, MainForm form)
         {
             // 置顶
-            if (form.TopMost != cfg.TopMost) form.TopMost = cfg.TopMost;
             form.RefreshTopMost(forceReinsert: true);
             SyncOpenSettingsFormsTopMost(form);
 

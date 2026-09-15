@@ -153,6 +153,9 @@ namespace CS2TradeMonitor.src.UI.Controls
         {
             switch (control)
             {
+                case LiteTextBox input:
+                    input.RefreshTheme();
+                    break;
                 case LiteSettingsGroup group:
                     group.ApplySystemTheme();
                     break;

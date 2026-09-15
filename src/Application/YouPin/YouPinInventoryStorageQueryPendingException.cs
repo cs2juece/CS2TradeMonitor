@@ -1,6 +1,6 @@
 namespace CS2TradeMonitor.Application.YouPin
 {
-    internal sealed class YouPinInventoryStorageQueryPendingException : InvalidOperationException
+    public sealed class YouPinInventoryStorageQueryPendingException : InvalidOperationException
     {
         public static readonly TimeSpan DefaultRetryAfter = TimeSpan.FromSeconds(3);
 

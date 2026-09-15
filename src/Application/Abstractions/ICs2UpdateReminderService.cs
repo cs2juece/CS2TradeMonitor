@@ -1,5 +1,4 @@
 using CS2TradeMonitor.Application.Notify;
-using CS2TradeMonitor.src.SystemServices;
 
 namespace CS2TradeMonitor.Application.Abstractions
 {
@@ -14,6 +13,11 @@ namespace CS2TradeMonitor.Application.Abstractions
         void Tick(Settings cfg);
 
         void ResetSchedule();
+
+        Task<Cs2UpdateCheckResult?> CheckIfDueAsync(
+            Settings cfg,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<Cs2UpdateCheckResult?>(null);
 
         Task<Cs2UpdateCheckResult> ManualCheckAsync(Settings cfg, bool resetBaseline = false);
 

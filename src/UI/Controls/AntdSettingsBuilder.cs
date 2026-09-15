@@ -24,7 +24,7 @@ namespace CS2TradeMonitor.src.UI.Controls
             };
 
             SetOptionalProperty(button, "BorderWidth", primary ? 0F : 1F);
-            SetOptionalProperty(button, "Radius", UIUtils.S(3));
+            SetOptionalProperty(button, "Radius", UIUtils.S(LiteCorners.Radius));
             SetOptionalProperty(button, "WaveSize", 0);
             return button;
         }
@@ -41,7 +41,7 @@ namespace CS2TradeMonitor.src.UI.Controls
 
             SetOptionalProperty(input, "PlaceholderText", placeholder);
             SetOptionalProperty(input, "PlaceholderColor", UIColors.TextDisabled);
-            SetOptionalProperty(input, "Radius", UIUtils.S(3));
+            SetOptionalProperty(input, "Radius", UIUtils.S(LiteCorners.Radius));
             return input;
         }
 

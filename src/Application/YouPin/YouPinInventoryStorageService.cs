@@ -1,5 +1,6 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Domain.YouPin;
+using CS2TradeMonitor.Shared.Ports;
 using CS2TradeMonitor.src.Core;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
@@ -7,7 +8,7 @@ using System.Text;
 
 namespace CS2TradeMonitor.Application.YouPin
 {
-    internal sealed class YouPinInventoryStorageService : IYouPinInventoryStorageService, IDisposable
+    public sealed class YouPinInventoryStorageService : IYouPinInventoryStorageService, IDisposable
     {
         private static readonly TimeSpan DuplicateWindow = TimeSpan.FromMinutes(3);
         private static readonly TimeSpan ConfirmationDelay = TimeSpan.FromSeconds(2);
@@ -15,26 +16,26 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private readonly IYouPinInventoryStorageAdapter _adapter;
         private readonly IYouPinAuthService _authService;
-        private readonly IClock _clock;
-        private readonly IAppDiagnostics _diagnostics;
+        private readonly CS2TradeMonitor.Shared.Ports.IClock _clock;
+        private readonly CS2TradeMonitor.Shared.Ports.IAppDiagnostics _diagnostics;
         private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
         private readonly SemaphoreSlim _operationGate = new(1, 1);
-        private readonly ConcurrentDictionary<string, DateTime> _recentOperations = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, DateTimeOffset> _recentOperations = new(StringComparer.Ordinal);
 
         public YouPinInventoryStorageService(
             IYouPinInventoryStorageAdapter adapter,
             IYouPinAuthService authService,
-            IClock clock,
-            IAppDiagnostics diagnostics)
-            : this(adapter, authService, clock, diagnostics, static (delay, token) => Task.Delay(delay, token))
+            CS2TradeMonitor.Shared.Ports.IClock clock,
+            CS2TradeMonitor.Shared.Ports.IAppDiagnostics diagnostics)
+            : this(adapter, authService, clock, diagnostics, clock.DelayAsync)
         {
         }
 
         internal YouPinInventoryStorageService(
             IYouPinInventoryStorageAdapter adapter,
             IYouPinAuthService authService,
-            IClock clock,
-            IAppDiagnostics diagnostics,
+            CS2TradeMonitor.Shared.Ports.IClock clock,
+            CS2TradeMonitor.Shared.Ports.IAppDiagnostics diagnostics,
             Func<TimeSpan, CancellationToken, Task> delayAsync)
         {
             _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
@@ -117,9 +118,11 @@ namespace CS2TradeMonitor.Application.YouPin
                         return Rejected(FirstText(write.Message, "悠悠有品未接受本次操作。"), normalizedCommand);
                     }
 
-                    _diagnostics.Info(
-                        "YouPinInventoryStorage",
-                        $"Transfer accepted. Direction={normalizedCommand.Direction}; Count={assetIds.Length}; Operation={operationKey}");
+                    await ReportAsync(
+                        "youpin.inventory-storage.transfer-accepted",
+                        $"库存存取请求已被悠悠接受。方向={normalizedCommand.Direction}；数量={assetIds.Length}；操作={operationKey}",
+                        DiagnosticSeverity.Information,
+                        cancellationToken).ConfigureAwait(false);
 
                     YouPinInventoryStorageViewState? confirmed = await TryConfirmAsync(
                         settings,
@@ -147,19 +150,31 @@ namespace CS2TradeMonitor.Application.YouPin
                 catch (Exception ex) when (!writeStarted)
                 {
                     _recentOperations.TryRemove(operationKey, out _);
-                    _diagnostics.Error("YouPinInventoryStorage", "Transfer failed before write started.", ex);
+                    await ReportAsync(
+                        "youpin.inventory-storage.preflight-failed",
+                        "库存存取在写入前失败。",
+                        DiagnosticSeverity.Warning,
+                        CancellationToken.None).ConfigureAwait(false);
                     return Rejected(BuildFriendlyError(ex), normalizedCommand);
                 }
-                catch (OperationCanceledException ex)
+                catch (OperationCanceledException)
                 {
-                    _diagnostics.Error("YouPinInventoryStorage", "Transfer result is uncertain after write started.", ex);
+                    await ReportAsync(
+                        "youpin.inventory-storage.write-cancelled",
+                        "库存存取写入开始后取消，结果需要回读确认。",
+                        DiagnosticSeverity.Warning,
+                        CancellationToken.None).ConfigureAwait(false);
                     return new YouPinInventoryStorageTransferResult(
                         YouPinInventoryStorageTransferStatus.AcceptedPending,
                         "请求可能已经提交，但等待结果时被取消。请刷新悠悠库存确认，不要重复提交。");
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    _diagnostics.Error("YouPinInventoryStorage", "Transfer result is uncertain after write started.", ex);
+                    await ReportAsync(
+                        "youpin.inventory-storage.write-uncertain",
+                        "库存存取写入开始后响应或回读失败，结果需要回读确认。",
+                        DiagnosticSeverity.Error,
+                        CancellationToken.None).ConfigureAwait(false);
                     return new YouPinInventoryStorageTransferResult(
                         YouPinInventoryStorageTransferStatus.AcceptedPending,
                         "请求可能已经提交，但响应或回读失败。请刷新悠悠库存确认，不要重复提交。");
@@ -265,8 +280,8 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private void RemoveExpiredOperations()
         {
-            DateTime cutoff = _clock.UtcNow - DuplicateWindow;
-            foreach ((string key, DateTime time) in _recentOperations)
+            DateTimeOffset cutoff = _clock.UtcNow - DuplicateWindow;
+            foreach ((string key, DateTimeOffset time) in _recentOperations)
             {
                 if (time < cutoff)
                     _recentOperations.TryRemove(key, out _);
@@ -310,6 +325,17 @@ namespace CS2TradeMonitor.Application.YouPin
             if (YouPinMobileApiClient.LooksLikeRateLimitOrRiskControl(message))
                 return "悠悠有品提示操作频繁或触发风控，请稍后再试。";
             return string.IsNullOrWhiteSpace(message) ? "库存存取请求失败。" : message;
+        }
+
+        private ValueTask ReportAsync(
+            string code,
+            string message,
+            DiagnosticSeverity severity,
+            CancellationToken cancellationToken)
+        {
+            return _diagnostics.ReportAsync(
+                new DiagnosticEvent(code, message, severity, _clock.UtcNow),
+                cancellationToken);
         }
 
         private static string FirstText(params string?[] values)

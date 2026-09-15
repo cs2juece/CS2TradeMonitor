@@ -80,6 +80,20 @@ CSQAQ terms. Credentials are read only from the service process environment
 and are not stored by CS2QuantWeb.
 
 
+Embedded purchase-monitoring catalog and template mappings
+---------------------------------------------------------
+
+The application embeds the following runtime resources:
+
+- CS2TradeMonitor.YouPinPrivacyAudit/Resources/hot-top1000.catalog.json.gz
+- CS2TradeMonitor.YouPinPrivacyAudit/Resources/hot-top1000.youpin-mapping.json.gz
+- CS2TradeMonitor.YouPinPrivacyAudit/Resources/source-plan-metadata.json
+
+They contain a 1,000-item catalog, item-to-YouPin-template mappings, and catalog
+provenance and coverage metadata. The project user explicitly approved inclusion
+of these versions on 2026-09-14. Resource hashes are checked before packaging.
+This inclusion approval does not assert ownership of third-party data.
+
 NuGet Dependency Inventory
 --------------------------
 

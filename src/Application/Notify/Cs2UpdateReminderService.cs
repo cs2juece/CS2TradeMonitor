@@ -12,7 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using CS2TradeMonitor.Application.Abstractions;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Notifications;
 
 namespace CS2TradeMonitor.Application.Notify
 {
@@ -43,11 +43,12 @@ namespace CS2TradeMonitor.Application.Notify
             }
         }
 
-        private static readonly Lazy<Cs2UpdateReminderService> LazyInstance = new(() => new Cs2UpdateReminderService());
+        private static readonly Lazy<Cs2UpdateReminderService> LazyInstance = new(NotificationCorePlatform.CreateCs2UpdateReminder);
         public static Cs2UpdateReminderService Instance => LazyInstance.Value;
 
         private readonly HttpClient _fkbuffClient;
         private readonly HttpClient _steamDbClient;
+        private readonly INotificationCoreHost _host;
         private readonly object _stateLock = new();
         private bool _checking;
         private DateTime _nextCheckAt = DateTime.MinValue;
@@ -55,14 +56,17 @@ namespace CS2TradeMonitor.Application.Notify
         private List<Cs2UpdateLogItem> _recentItems = new();
         private long _lastRequestTimestampMs;
 
-        private Cs2UpdateReminderService()
-            : this(NotifyRuntimeServices.ResolveDomesticHttpFactory())
+        internal Cs2UpdateReminderService(IDomesticHttpClientFactory httpFactory)
+            : this(httpFactory, NoopNotificationCoreHost.Instance)
         {
         }
 
-        internal Cs2UpdateReminderService(IDomesticHttpClientFactory httpFactory)
+        private Cs2UpdateReminderService(
+            IDomesticHttpClientFactory httpFactory,
+            INotificationCoreHost host)
         {
             if (httpFactory == null) throw new ArgumentNullException(nameof(httpFactory));
+            _host = host ?? throw new ArgumentNullException(nameof(host));
 
             _fkbuffClient = httpFactory.Create(15);
             _fkbuffClient.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
@@ -75,6 +79,11 @@ namespace CS2TradeMonitor.Application.Notify
             _steamDbClient.DefaultRequestHeaders.TryAddWithoutValidation("Referer", Cs2UpdateUrls.SteamDbPage);
             _steamDbClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ApplicationUserAgent);
         }
+
+        public static Cs2UpdateReminderService Create(
+            IDomesticHttpClientFactory httpFactory,
+            INotificationCoreHost host)
+            => new(httpFactory, host);
 
         public event EventHandler<Cs2UpdateDetectedEventArgs>? UpdateDetected;
 
@@ -90,13 +99,24 @@ namespace CS2TradeMonitor.Application.Notify
 
         public void Tick(Settings cfg)
         {
+            _ = CheckIfDueAsync(cfg);
+        }
+
+        public async Task<Cs2UpdateCheckResult?> CheckIfDueAsync(
+            Settings cfg,
+            CancellationToken cancellationToken = default)
+        {
             if (cfg == null || !cfg.Cs2UpdateReminderEnabled)
-                return;
+                return null;
 
             if (_checking || DateTime.Now < _nextCheckAt)
-                return;
+                return null;
 
-            _ = CheckAsync(cfg, notify: true, resetBaseline: false);
+            return await CheckAsync(
+                cfg,
+                notify: true,
+                resetBaseline: false,
+                cancellationToken).ConfigureAwait(false);
         }
 
         public void ResetSchedule()
@@ -131,7 +151,7 @@ namespace CS2TradeMonitor.Application.Notify
                     cfg.Cs2UpdateLastStatus = "检查完成：暂无更新数据";
                     var empty = new Cs2UpdateCheckResult(true, false, "检查完成：暂无更新数据", null, 0, now);
                     StoreResult(empty, items);
-                    cfg.Save();
+                    await _host.SaveSettingsAsync(cfg, cancellationToken).ConfigureAwait(false);
                     ScheduleNext(cfg);
                     return empty;
                 }
@@ -142,7 +162,7 @@ namespace CS2TradeMonitor.Application.Notify
                     cfg.Cs2UpdateLastStatus = resetBaseline ? "已重置基准" : "已建立基准";
                     var baseline = new Cs2UpdateCheckResult(true, false, cfg.Cs2UpdateLastStatus, latest, 0, now);
                     StoreResult(baseline, items);
-                    cfg.Save();
+                    await _host.SaveSettingsAsync(cfg, cancellationToken).ConfigureAwait(false);
                     ScheduleNext(cfg);
                     return baseline;
                 }
@@ -152,7 +172,7 @@ namespace CS2TradeMonitor.Application.Notify
                     cfg.Cs2UpdateLastStatus = "没有新的 CS2 更新";
                     var unchanged = new Cs2UpdateCheckResult(true, false, cfg.Cs2UpdateLastStatus, latest, 0, now);
                     StoreResult(unchanged, items);
-                    cfg.Save();
+                    await _host.SaveSettingsAsync(cfg, cancellationToken).ConfigureAwait(false);
                     ScheduleNext(cfg);
                     return unchanged;
                 }
@@ -166,7 +186,7 @@ namespace CS2TradeMonitor.Application.Notify
 
                 var changed = new Cs2UpdateCheckResult(true, true, cfg.Cs2UpdateLastStatus, latest, newItems.Count, now);
                 StoreResult(changed, items);
-                cfg.Save();
+                await _host.SaveSettingsAsync(cfg, cancellationToken).ConfigureAwait(false);
                 ScheduleNext(cfg);
 
                 if (notify)
@@ -179,11 +199,11 @@ namespace CS2TradeMonitor.Application.Notify
                 bool sourceUnavailable = IsSourceUnavailable(ex);
                 if (sourceUnavailable)
                 {
-                    DiagnosticsLogger.Info("CS2Update", $"CS2 update source unavailable: {ex.Message}");
+                    _host.Info("CS2Update", "source-unavailable");
                 }
                 else
                 {
-                    DiagnosticsLogger.Error("CS2Update", "CS2 update check failed.", ex);
+                    _host.Error("CS2Update", "check-failed", ex);
                 }
 
                 var now = DateTime.Now;
@@ -191,7 +211,7 @@ namespace CS2TradeMonitor.Application.Notify
                 cfg.Cs2UpdateLastStatus = sourceUnavailable ? ex.Message : "检查失败：网络或格式异常";
                 var failed = Cs2UpdateCheckResult.Fail(cfg.Cs2UpdateLastStatus, now);
                 StoreResult(failed, RecentItems);
-                cfg.Save();
+                await _host.SaveSettingsAsync(cfg, cancellationToken).ConfigureAwait(false);
                 ScheduleNext(cfg);
                 return failed;
             }
@@ -373,9 +393,9 @@ namespace CS2TradeMonitor.Application.Notify
                 .ToList();
         }
 
-        private static void LogSourceFailure(string source, Exception ex)
+        private void LogSourceFailure(string source, Exception ex)
         {
-            DiagnosticsLogger.Info("CS2Update", $"{source} update source unavailable: {ex.Message}");
+            _host.Info("CS2Update", $"source-unavailable:{source}");
         }
 
         private static bool IsSourceUnavailable(Exception ex)

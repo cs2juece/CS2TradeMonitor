@@ -17,7 +17,7 @@ namespace CS2TradeMonitor.src.UI.Framework
         private readonly LiteButton _cancel = new("取消", false) { Width = UIUtils.S(88) };
         private readonly LiteButton _save = new("保存", true) { Width = UIUtils.S(88) };
 
-        private YouPinLandlordWeeklyFreeDialog(
+        internal YouPinLandlordWeeklyFreeDialog(
             string scopeText,
             YouPinLandlordWeeklyFreeRule current)
         {
@@ -36,6 +36,8 @@ namespace CS2TradeMonitor.src.UI.Framework
             _enabled.Checked = current.Enabled;
             _minimum = CreateMoneyInput(current.MinimumItemValue);
             _maximum = CreateMoneyInput(current.MaximumItemValue);
+            _minimum.ValidationFailed += ShowValidationError;
+            _maximum.ValidationFailed += ShowValidationError;
 
             var title = CreateLabel("周周免租", 13F, FontStyle.Bold, UIColors.TextMain);
             var scope = CreateLabel(scopeText, 8.8F, FontStyle.Regular, UIColors.TextSub);
@@ -105,6 +107,9 @@ namespace CS2TradeMonitor.src.UI.Framework
 
         private void SaveRule()
         {
+            if (!_minimum.TryCommitText() || !_maximum.TryCommitText())
+                return;
+
             if (_maximum.Value < _minimum.Value)
             {
                 GlobalPromptService.Show(
@@ -124,9 +129,12 @@ namespace CS2TradeMonitor.src.UI.Framework
             Close();
         }
 
+        private void ShowValidationError(string message)
+            => GlobalPromptService.Show(this, message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
         private static LandlordNumberInput CreateMoneyInput(decimal value)
         {
-            return new LandlordNumberInput(
+            var input = new LandlordNumberInput(
                 minimum: 0m,
                 maximum: 1_000_000m,
                 value: value,
@@ -135,6 +143,8 @@ namespace CS2TradeMonitor.src.UI.Framework
             {
                 Width = UIUtils.S(92)
             };
+            input.Inner.Enter += (_, _) => input.Inner.SelectAll();
+            return input;
         }
 
         private static Label CreateLabel(

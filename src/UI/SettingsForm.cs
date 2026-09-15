@@ -18,6 +18,7 @@ namespace CS2TradeMonitor.src.UI
     {
         private const int PageOnShowDelayMs = 45;
         private const int DeferredContentNativeThemeDelayMs = 120;
+        private const int SidebarWidth = 250;
         private Settings _cfg; // Live Settings
         private Settings _draftCfg; // Draft Settings
         private UIController _ui;
@@ -124,7 +125,7 @@ namespace CS2TradeMonitor.src.UI
 
         public Settings LiveConfig => _cfg;
 
-        public SettingsForm(Settings cfg, UIController ui, MainForm mainForm, string initialPageKey = "MainPanel")
+        public SettingsForm(Settings cfg, UIController ui, MainForm mainForm, string initialPageKey = SettingsPageRegistry.DefaultRouteKey)
             : this(cfg, ui, mainForm, initialPageKey, SettingsFormRuntimeServices.Resolve())
         {
         }
@@ -222,7 +223,8 @@ namespace CS2TradeMonitor.src.UI
             Size restoredSize = SettingsFormStateModel.BuildRestoredWindowSize(
                 workingArea,
                 _draftCfg.SettingsPanelWindowWidth,
-                _draftCfg.SettingsPanelWindowHeight);
+                _draftCfg.SettingsPanelWindowHeight,
+                _draftCfg.SettingsPanelWindowPlacementVersion);
             this.Bounds = SettingsFormStateModel.BuildCenteredWindowBounds(workingArea, restoredSize);
             _normalWindowBounds = Bounds;
             this.FormBorderStyle = FormBorderStyle.None;
@@ -274,7 +276,7 @@ namespace CS2TradeMonitor.src.UI
                 Padding = new Padding(0),
                 BackColor = UIColors.MainBg
             };
-            _rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UIUtils.S(210)));
+            _rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UIUtils.S(SidebarWidth)));
             _rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             _rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             _chromeLayout.Controls.Add(_rootLayout, 0, 1);
@@ -505,14 +507,9 @@ namespace CS2TradeMonitor.src.UI
         private void RestoreSettingsWindow()
         {
             Rectangle workingArea = Screen.FromControl(this).WorkingArea;
-            Rectangle restored = SettingsFormStateModel.BuildCenteredWindowBounds(workingArea, _normalWindowBounds.Size);
-            if (_normalWindowBounds.Width > 0 && _normalWindowBounds.Height > 0)
-            {
-                Size clamped = SettingsFormStateModel.ClampWindowSize(_normalWindowBounds.Size, workingArea);
-                int left = Math.Clamp(_normalWindowBounds.Left, workingArea.Left, Math.Max(workingArea.Left, workingArea.Right - clamped.Width));
-                int top = Math.Clamp(_normalWindowBounds.Top, workingArea.Top, Math.Max(workingArea.Top, workingArea.Bottom - clamped.Height));
-                restored = new Rectangle(left, top, clamped.Width, clamped.Height);
-            }
+            Rectangle restored = _normalWindowBounds.Width > 0 && _normalWindowBounds.Height > 0
+                ? SettingsFormStateModel.ClampWindowBounds(_normalWindowBounds, workingArea)
+                : SettingsFormStateModel.BuildCenteredWindowBounds(workingArea, SettingsFormStateModel.BuildWindowSize(workingArea));
 
             _suppressWindowPlacementSave = true;
             try
@@ -561,12 +558,15 @@ namespace CS2TradeMonitor.src.UI
             SyncSettingsWindowMaximizedFromWindowState();
             Rectangle normalBounds = _settingsWindowMaximized ? _normalWindowBounds : Bounds;
             Size savedSize = SettingsFormStateModel.ClampWindowSize(normalBounds.Size, workingArea);
+            Size persistedSize = SettingsFormStateModel.BuildPersistedWindowSize(savedSize);
 
-            _cfg.SettingsPanelWindowWidth = savedSize.Width;
-            _cfg.SettingsPanelWindowHeight = savedSize.Height;
+            _cfg.SettingsPanelWindowWidth = persistedSize.Width;
+            _cfg.SettingsPanelWindowHeight = persistedSize.Height;
+            _cfg.SettingsPanelWindowPlacementVersion = SettingsFormStateModel.CurrentWindowPlacementVersion;
             _cfg.SettingsPanelWindowMaximized = _settingsWindowMaximized;
-            _draftCfg.SettingsPanelWindowWidth = savedSize.Width;
-            _draftCfg.SettingsPanelWindowHeight = savedSize.Height;
+            _draftCfg.SettingsPanelWindowWidth = persistedSize.Width;
+            _draftCfg.SettingsPanelWindowHeight = persistedSize.Height;
+            _draftCfg.SettingsPanelWindowPlacementVersion = SettingsFormStateModel.CurrentWindowPlacementVersion;
             _draftCfg.SettingsPanelWindowMaximized = _settingsWindowMaximized;
             SettingsSaveResult saveResult = _cfg.Save();
             if (!saveResult.Succeeded)
@@ -713,7 +713,7 @@ namespace CS2TradeMonitor.src.UI
                 _visiblePage = null;
                 _pnlContent.Controls.Clear();
                 _currentKey = "";
-                SwitchPage(string.IsNullOrWhiteSpace(pageKey) ? "MainPanel" : pageKey);
+                SwitchPage(SettingsPageRegistry.NormalizeInitialKey(pageKey));
                 if (pageKey == "MainPanel"
                     && mainTab != null
                     && _pages.TryGetValue("MainPanel", out var newPage)
@@ -731,16 +731,23 @@ namespace CS2TradeMonitor.src.UI
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
             base.OnDpiChanged(e);
-            UIUtils.UpdateScale(this.DeviceDpi / 96f, (float)_draftCfg.UIScale);
-            ApplyFormScaling();
+            UIUtils.UpdateScale(e.DeviceDpiNew / 96f, (float)_draftCfg.UIScale);
+            ApplyFormScaling(e.SuggestedRectangle, e.DeviceDpiOld, e.DeviceDpiNew);
         }
 
         private void ApplyFormScaling()
         {
+            ApplyFormScaling(suggestedBounds: null, oldDpi: null, newDpi: null);
+        }
+
+        private void ApplyFormScaling(Rectangle? suggestedBounds, int? oldDpi, int? newDpi)
+        {
             SuspendLayout();
 
             // 1. Keep the user's window size while refreshing scale-dependent chrome metrics.
-            var workingArea = Screen.FromControl(this).WorkingArea;
+            Rectangle workingArea = suggestedBounds.HasValue
+                ? Screen.FromRectangle(suggestedBounds.Value).WorkingArea
+                : Screen.FromControl(this).WorkingArea;
             MaximizedBounds = workingArea;
             this.MinimumSize = SettingsFormStateModel.BuildMinimumWindowSize(workingArea);
             _suppressWindowPlacementSave = true;
@@ -749,14 +756,34 @@ namespace CS2TradeMonitor.src.UI
                 SyncSettingsWindowMaximizedFromWindowState();
                 if (_settingsWindowMaximized)
                 {
+                    if (oldDpi.HasValue && newDpi.HasValue)
+                    {
+                        _normalWindowBounds = SettingsFormStateModel.ScaleNormalWindowBoundsForDpi(
+                            _normalWindowBounds,
+                            workingArea,
+                            oldDpi.Value,
+                            newDpi.Value);
+                    }
+
                     if (WindowState != FormWindowState.Maximized)
+                    {
                         WindowState = FormWindowState.Maximized;
+                    }
+                    else if (SettingsFormStateModel.NeedsMaximizedBoundsRefresh(
+                        isMaximized: true,
+                        Bounds,
+                        workingArea))
+                    {
+                        WindowState = FormWindowState.Normal;
+                        WindowState = FormWindowState.Maximized;
+                    }
                 }
                 else
                 {
-                    Size clamped = SettingsFormStateModel.ClampWindowSize(Size, workingArea);
-                    if (Size != clamped)
-                        Size = clamped;
+                    Rectangle requestedBounds = suggestedBounds ?? Bounds;
+                    Rectangle clamped = SettingsFormStateModel.ClampWindowBounds(requestedBounds, workingArea);
+                    if (Bounds != clamped)
+                        Bounds = clamped;
                     _normalWindowBounds = Bounds;
                 }
             }
@@ -770,7 +797,7 @@ namespace CS2TradeMonitor.src.UI
                 _chromeLayout.RowStyles[0] = new RowStyle(SizeType.Absolute, UIUtils.S(34));
 
             if (_rootLayout.ColumnStyles.Count > 0)
-                _rootLayout.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, UIUtils.S(210));
+                _rootLayout.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, UIUtils.S(SidebarWidth));
 
             if (_pnlMain.RowStyles.Count > 1)
                 _pnlMain.RowStyles[1] = new RowStyle(SizeType.Absolute, 0);
@@ -1033,9 +1060,7 @@ namespace CS2TradeMonitor.src.UI
             _pages.Clear();
             RebuildNavigation();
 
-            string normalized = string.IsNullOrWhiteSpace(initialPageKey)
-                ? "MainPanel"
-                : SettingsPageRegistry.NormalizeKey(initialPageKey);
+            string normalized = SettingsPageRegistry.NormalizeInitialKey(initialPageKey);
             SwitchPage(normalized);
         }
 

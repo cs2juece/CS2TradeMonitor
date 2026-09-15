@@ -604,6 +604,7 @@ namespace CS2TradeMonitor.src.UI.Framework
                 YouPinLandlordActionState.PricingReady => "已取得定价",
                 YouPinLandlordActionState.Planned => "待处理",
                 YouPinLandlordActionState.Executing => "执行中",
+                YouPinLandlordActionState.WaitingForRateLimit => "限流等待",
                 YouPinLandlordActionState.AwaitingSynchronization => "等待同步",
                 YouPinLandlordActionState.Rechecking => "回查中",
                 YouPinLandlordActionState.Succeeded => "成功",

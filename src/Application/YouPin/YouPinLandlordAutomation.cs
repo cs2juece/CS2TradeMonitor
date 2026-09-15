@@ -1,7 +1,6 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Domain.YouPin;
 using CS2TradeMonitor.src.Core;
-using CS2TradeMonitor.src.SystemServices;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -23,6 +22,7 @@ namespace CS2TradeMonitor.Application.YouPin
         private readonly YouPinLandlordInventoryRentExecutor _inventoryRentExecutor;
         private readonly YouPinLandlordExecutionCadence _executionCadence = new();
         private readonly Action<Settings>? _persistSettings;
+        private readonly bool _usesInternalTimer;
         private readonly CancellationTokenSource _lifetimeCancellation = new();
         private readonly System.Threading.Timer _backgroundTimer;
         private readonly object _stateLock = new();
@@ -46,7 +46,9 @@ namespace CS2TradeMonitor.Application.YouPin
             IClock clock,
             IReadOnlyList<IYouPinLandlordDecisionRule>? decisionRules = null,
             TimeSpan? writeInterval = null,
-            Action<Settings>? persistSettings = null)
+            Action<Settings>? persistSettings = null,
+            bool usesInternalTimer = true,
+            Func<TimeSpan, CancellationToken, Task>? repriceRecheckDelay = null)
         {
             _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
             _auditStore = auditStore ?? throw new ArgumentNullException(nameof(auditStore));
@@ -55,6 +57,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 ? decisionRules.ToArray()
                 : new IYouPinLandlordDecisionRule[] { new YouPinLandlordRankDecisionRule() };
             _persistSettings = persistSettings;
+            _usesInternalTimer = usesInternalTimer;
             _writeCoordinator = new YouPinLandlordWriteCoordinator(writeInterval ?? TimeSpan.Zero);
             _repriceExecutor = new YouPinLandlordRepriceExecutor(
                 _gateway,
@@ -63,7 +66,9 @@ namespace CS2TradeMonitor.Application.YouPin
                 () => _settings,
                 IsRentalTypeEnabled,
                 _lifetimeCancellation.Token,
-                _writeCoordinator);
+                _writeCoordinator,
+                SuspendRepricing,
+                repriceRecheckDelay);
             _inventoryRentExecutor = new YouPinLandlordInventoryRentExecutor(
                 _gateway,
                 _auditStore,
@@ -745,25 +750,15 @@ namespace CS2TradeMonitor.Application.YouPin
                                 state = YouPinLandlordActionState.Skipped;
                                 reason = "悠悠一键定价返回不完整，未取得有效短租、押金或租期，本次不自动上架";
                             }
-                            else if (protectedOwnPrice.HasValue
-                                && weeklyFreeMatched
-                                && protectedOwnPrice.Value > YouPinLandlordWeeklyFreeRule.MaximumAllowedRent)
-                            {
-                                state = YouPinLandlordActionState.Skipped;
-                                reason = "自有同名货架租金高于周周免租上限；为避免自压，本次不自动上架";
-                            }
                             else
                             {
-                                targetShortRent = protectedOwnPrice
-                                    ?? (weeklyFreeMatched
-                                        ? Math.Min(quote.ShortRent, YouPinLandlordWeeklyFreeRule.MaximumAllowedRent)
-                                        : quote.ShortRent);
+                                decimal candidate = protectedOwnPrice ?? quote.ShortRent;
+                                targetShortRent = weeklyFreeMatched
+                                    ? Math.Min(candidate, YouPinLandlordWeeklyFreeRule.MaximumAllowedRent)
+                                    : candidate;
                                 state = YouPinLandlordActionState.Planned;
-                                reason = protectedOwnPrice.HasValue
-                                    ? $"自有同名商品已在货架，按最佳自有出租位租金 {protectedOwnPrice:0.##} 对齐"
-                                    : weeklyFreeMatched
-                                        ? $"采用悠悠一键定价并限制短租金严格小于 {YouPinLandlordWeeklyFreeRule.ExclusiveRentLimit:0.00}"
-                                        : $"采用悠悠一键定价 {quote.ShortRent:0.##}";
+                                reason = DescribeWeeklyFreePricing(inventoryPolicy.WeeklyFree,
+                                    item.ReferencePrice, candidate, targetShortRent.Value, protectedOwnPrice);
                             }
                         }
                     }
@@ -797,7 +792,7 @@ namespace CS2TradeMonitor.Application.YouPin
                             action,
                             YouPinLandlordOperationStage.PricingObtained,
                             "已取得定价",
-                            $"悠悠一键定价：短租 {quote.ShortRent:0.##}，长租 {quote.LongRent:0.##}，押金 {quote.Deposit:0.##}",
+                            $"悠悠一键定价：短租 {quote.ShortRent:0.##}，长租 {quote.LongRent:0.##}，押金 {quote.Deposit:0.##}；{reason}",
                             stopwatch.ElapsedMilliseconds,
                             cancellationToken,
                             runMode).ConfigureAwait(false);
@@ -1234,13 +1229,20 @@ namespace CS2TradeMonitor.Application.YouPin
                         actionReason = "当前处于冷却时段，只更新货架观察，不执行定价或写操作";
                     }
                     else if (rentalPolicy.Enabled
-                        && protectedOwnPrice.HasValue
-                        && protectedOwnPrice.Value != listing.ShortRent)
+                        && protectedOwnPrice.HasValue)
                     {
                         actionKind = YouPinLandlordActionKind.AlignOwnPrice;
-                        actionState = YouPinLandlordActionState.Planned;
-                        targetShortRent = protectedOwnPrice.Value;
-                        actionReason = $"自有同款已进入目标出租位，对齐受保护租金 {protectedOwnPrice:0.##}";
+                        bool matched = rentalPolicy.WeeklyFree.Matches(listing.ReferencePrice);
+                        targetShortRent = matched
+                            ? Math.Min(Math.Min(protectedOwnPrice.Value, YouPinLandlordWeeklyFreeRule.MaximumAllowedRent), listing.ShortRent)
+                            : protectedOwnPrice.Value;
+                        actionState = targetShortRent != listing.ShortRent
+                            ? YouPinLandlordActionState.Planned : YouPinLandlordActionState.Observed;
+                        if (actionState == YouPinLandlordActionState.Observed) actionKind = YouPinLandlordActionKind.ObserveOnly;
+                        actionReason = DescribeWeeklyFreePricing(rentalPolicy.WeeklyFree,
+                            listing.ReferencePrice, protectedOwnPrice.Value, targetShortRent.Value, protectedOwnPrice)
+                            + $"；当前短租 {listing.ShortRent:0.00}"
+                            + (actionState == YouPinLandlordActionState.Observed ? "；目标与当前一致，无需改价" : "");
                     }
                     else if (rentalPolicy.Enabled && !protectedOwnPrice.HasValue)
                     {
@@ -1259,13 +1261,12 @@ namespace CS2TradeMonitor.Application.YouPin
                         actionState = YouPinLandlordActionState.Planned;
                         bool weeklyFreeMatched = rentalPolicy.WeeklyFree.Matches(listing.ReferencePrice);
                         targetShortRent = weeklyFreeMatched
-                            ? Math.Min(
-                                pricingQuote.ShortRent,
-                                YouPinLandlordWeeklyFreeRule.MaximumAllowedRent)
+                            ? Math.Min(Math.Min(pricingQuote.ShortRent,
+                                YouPinLandlordWeeklyFreeRule.MaximumAllowedRent), listing.ShortRent)
                             : pricingQuote.ShortRent;
-                        actionReason = weeklyFreeMatched
-                            ? $"命中周周免租价值区间，短租金限制为严格小于 {YouPinLandlordWeeklyFreeRule.ExclusiveRentLimit:0.00}"
-                            : $"尚无自有同款进入目标出租位，采用悠悠一键定价 {pricingQuote.ShortRent:0.##}";
+                        actionReason = DescribeWeeklyFreePricing(rentalPolicy.WeeklyFree,
+                            listing.ReferencePrice, pricingQuote.ShortRent, targetShortRent.Value, null)
+                            + $"；当前短租 {listing.ShortRent:0.00}";
                     }
                     var row = new YouPinLandlordShelfItem(
                         actionId,
@@ -1302,6 +1303,12 @@ namespace CS2TradeMonitor.Application.YouPin
                         TargetLeaseMaxDays = pricingQuote?.LeaseMaxDays
                     };
 
+                    if (rentalPolicy.Enabled && targetShortRent.HasValue)
+                    {
+                        await AppendActionRecordAsync(runPolicy, plannedAction,
+                            YouPinLandlordOperationStage.Decision, "定价规则", actionReason,
+                            stopwatch.ElapsedMilliseconds, cancellationToken, runMode).ConfigureAwait(false);
+                    }
                     if (plannedAction.State == YouPinLandlordActionState.Planned)
                     {
                         if (pricingQuote != null)
@@ -1358,7 +1365,7 @@ namespace CS2TradeMonitor.Application.YouPin
                             }
                             catch (Exception ex) when (ex is not OperationCanceledException)
                             {
-                                string failureReason = $"单件改价异常：{ex.GetType().Name}";
+                                string failureReason = FormatRepriceFailure("单件改价异常", ex);
                                 await AppendActionRecordAsync(
                                     runPolicy,
                                     plannedAction,
@@ -1389,22 +1396,39 @@ namespace CS2TradeMonitor.Application.YouPin
                     action.State == YouPinLandlordActionState.Skipped);
                 int plannedCount = plannedActions.Count(action =>
                     action.State == YouPinLandlordActionState.Planned);
+                int observedCount = plannedActions.Count(action =>
+                    action.State == YouPinLandlordActionState.Observed);
+                int pendingCount = plannedActions.Count(action =>
+                    action.State == YouPinLandlordActionState.AwaitingSynchronization);
+                int unprocessedCount = remote.Listings.Count
+                    - succeededCount - failedCount - skippedCount - observedCount - pendingCount;
                 string completionMessage = runMode == YouPinLandlordRunMode.ScanOnly
-                    ? $"货架扫描完成，共 {shelf.Count} 件；待执行 {plannedCount}，跳过 {skippedCount}。"
-                    : $"改价执行完成，共 {shelf.Count} 件；成功 {succeededCount}，失败 {failedCount}，跳过 {skippedCount}。";
+                    ? $"货架扫描完成，共 {remote.Listings.Count} 件；待执行 {plannedCount}，跳过 {skippedCount}，仅观察 {observedCount}，未处理 {unprocessedCount - plannedCount}。"
+                    : $"改价执行完成，共 {remote.Listings.Count} 件；成功 {succeededCount}，失败 {failedCount}，待确认 {pendingCount}，跳过 {skippedCount}，仅观察 {observedCount}，未执行 {unprocessedCount}。";
+                string runResult = runMode == YouPinLandlordRunMode.ScanOnly ? "检查完成"
+                    : failedCount > 0 ? succeededCount > 0 ? "部分失败" : "失败"
+                    : pendingCount > 0 ? "待确认"
+                    : unprocessedCount > 0 ? "未完成"
+                    : succeededCount > 0 ? "成功"
+                    : skippedCount > 0 ? observedCount > 0 ? "未执行" : "全部跳过"
+                    : observedCount > 0 ? "无需改价" : "无商品";
                 string status = runMode == YouPinLandlordRunMode.ScanOnly
                     ? "检查完成"
                     : failedCount > 0
                         ? succeededCount > 0
                             ? $"执行部分失败 · 成功 {succeededCount} / 失败 {failedCount}"
                             : $"执行失败 · 成功 0 / 失败 {failedCount}"
-                        : $"执行成功 · 成功 {succeededCount} / 失败 0";
+                        : pendingCount > 0
+                            ? $"执行待确认 · 成功 {succeededCount} / 待确认 {pendingCount}"
+                            : succeededCount > 0 && unprocessedCount == 0
+                                ? $"执行成功 · 成功 {succeededCount} / 失败 0"
+                                : $"{runResult} · 仅观察 {observedCount} / 跳过 {skippedCount} / 未执行 {unprocessedCount}";
                 await AppendRunRecordAsync(
                     runId,
                     workflow,
                     runPolicy.PolicyVersion,
                     YouPinLandlordOperationStage.RunCompleted,
-                    failedCount > 0 ? "部分失败" : "成功",
+                    runResult,
                     completionMessage,
                     stopwatch.ElapsedMilliseconds,
                     cancellationToken,
@@ -1470,7 +1494,7 @@ namespace CS2TradeMonitor.Application.YouPin
                 }
 
                 SnapshotChanged?.Invoke();
-                return YouPinLandlordRunResult.Completed(runId, completionMessage, shelf.Count);
+                return YouPinLandlordRunResult.Completed(runId, completionMessage, remote.Listings.Count);
             }
             catch (OperationCanceledException)
             {
@@ -1555,6 +1579,18 @@ namespace CS2TradeMonitor.Application.YouPin
                     ? Array.Empty<string>()
                     : selectedItemNames
             };
+        }
+
+        private static string DescribeWeeklyFreePricing(YouPinLandlordWeeklyFreeRule rule,
+            decimal itemValue, decimal candidate, decimal target, decimal? protectedOwnPrice)
+        {
+            string status = !rule.Enabled ? "周周免租已关闭"
+                : !rule.Matches(itemValue) ? "周周免租未命中"
+                : protectedOwnPrice > YouPinLandlordWeeklyFreeRule.MaximumAllowedRent ? "周周免租优先，覆盖防自压"
+                : "周周免租已命中";
+            string source = protectedOwnPrice.HasValue ? "自有保护价" : "一键定价";
+            return $"【{status}】参考价值 {itemValue:0.00}，配置区间 {rule.MinimumItemValue:0.00}–{rule.MaximumItemValue:0.00}；"
+                + $"{source} {candidate:0.00}，免租上限 {YouPinLandlordWeeklyFreeRule.MaximumAllowedRent:0.00}；目标短租 {target:0.00}";
         }
 
         private static YouPinLandlordWeeklyFreeRule NormalizeWeeklyFree(YouPinLandlordWeeklyFreeRule? rule)
@@ -1705,6 +1741,41 @@ namespace CS2TradeMonitor.Application.YouPin
             }
         }
 
+        private string SuspendRepricing(string reason)
+        {
+            string message = reason + "；已关闭 0CD 和普通出租自动改价";
+            lock (_stateLock)
+            {
+                _policy = _policy with
+                {
+                    PolicyVersion = _policy.PolicyVersion + 1,
+                    ZeroCd = _policy.ZeroCd with { Enabled = false },
+                    InventoryRental = _policy.InventoryRental with { Enabled = false },
+                    UnifiedRental = _policy.UnifiedRental with { Enabled = false }
+                };
+                _settings.YouPinLandlordPolicyVersion = _policy.PolicyVersion;
+                _settings.YouPinLandlordZeroCdEnabled = false;
+                _settings.YouPinLandlordInventoryRentalEnabled = false;
+                _settings.YouPinLandlordUnifiedEnabled = false;
+                _snapshot = _snapshot with { PolicyVersion = _policy.PolicyVersion, LastError = message };
+            }
+
+            try
+            {
+                _persistSettings?.Invoke(_settings);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceError("YouPinLandlord safety pause persistence failed: " + ex.GetType().Name);
+                message += "；暂停设置保存失败，重启前请确认改价开关仍为关闭";
+                lock (_stateLock)
+                    _snapshot = _snapshot with { LastError = message };
+            }
+            ResetBackgroundSchedule();
+            SnapshotChanged?.Invoke();
+            return message;
+        }
+
         private void PersistExecutionStart(YouPinLandlordExecutionState state)
         {
             long unixMilliseconds = new DateTimeOffset(state.LastStartedAtUtc).ToUnixTimeMilliseconds();
@@ -1740,10 +1811,8 @@ namespace CS2TradeMonitor.Application.YouPin
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Error(
-                    "YouPinLandlord",
-                    "Persisting the three-minute execution cooldown failed.",
-                    ex);
+                Trace.TraceError(
+                    "YouPinLandlord cooldown persistence failed: " + ex.GetType().Name);
             }
         }
 
@@ -1829,6 +1898,11 @@ namespace CS2TradeMonitor.Application.YouPin
                 cancellationToken);
         }
 
+        internal Task RunScheduledCycleAsync(CancellationToken cancellationToken = default)
+        {
+            return RunBackgroundTimerAsync(cancellationToken);
+        }
+
         private void HandleBackgroundTimer(object? state)
         {
             lock (_lifecycleLock)
@@ -1836,11 +1910,11 @@ namespace CS2TradeMonitor.Application.YouPin
                 if (_disposed)
                     return;
 
-                _backgroundTask = RunBackgroundTimerAsync();
+                _backgroundTask = RunBackgroundTimerAsync(_lifetimeCancellation.Token);
             }
         }
 
-        private async Task RunBackgroundTimerAsync()
+        private async Task RunBackgroundTimerAsync(CancellationToken cancellationToken)
         {
             YouPinRentalScanScope dueExecutionScope = GetDueRentalExecutionScope();
             YouPinRentalScanScope dueScanScope = GetDueBackgroundScope() & ~dueExecutionScope;
@@ -1863,7 +1937,7 @@ namespace CS2TradeMonitor.Application.YouPin
                         "后台定时执行库存自动出租",
                         YouPinLandlordRunMode.Execute,
                         manualExecution: false,
-                        _lifetimeCancellation.Token).ConfigureAwait(false);
+                        cancellationToken).ConfigureAwait(false);
                     if (!inventoryResult.Skipped)
                         AdvanceInventoryBackgroundSchedule(inventoryResult.Success);
                 }
@@ -1873,7 +1947,7 @@ namespace CS2TradeMonitor.Application.YouPin
                         "后台定时扫描库存",
                         YouPinLandlordRunMode.ScanOnly,
                         manualExecution: false,
-                        _lifetimeCancellation.Token).ConfigureAwait(false);
+                        cancellationToken).ConfigureAwait(false);
                     if (!inventoryResult.Skipped)
                         AdvanceInventoryBackgroundSchedule(inventoryResult.Success);
                 }
@@ -1886,7 +1960,7 @@ namespace CS2TradeMonitor.Application.YouPin
                         "后台定时执行租赁自动改价",
                         YouPinLandlordRunMode.Execute,
                         manualExecution: false,
-                        _lifetimeCancellation.Token).ConfigureAwait(false);
+                        cancellationToken).ConfigureAwait(false);
                     if (!result.Skipped)
                         AdvanceBackgroundSchedule(dueExecutionScope, result.Success);
                 }
@@ -1899,7 +1973,7 @@ namespace CS2TradeMonitor.Application.YouPin
                         "后台定时扫描租赁货架",
                         YouPinLandlordRunMode.ScanOnly,
                         manualExecution: false,
-                        _lifetimeCancellation.Token).ConfigureAwait(false);
+                        cancellationToken).ConfigureAwait(false);
                     if (!result.Skipped)
                         AdvanceBackgroundSchedule(dueScanScope, result.Success);
                 }
@@ -2124,7 +2198,7 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private void ScheduleNextBackgroundCheck()
         {
-            if (_disposed)
+            if (_disposed || !_usesInternalTimer)
                 return;
 
             DateTime nextCheckUtc;
@@ -2373,10 +2447,19 @@ namespace CS2TradeMonitor.Application.YouPin
                 YouPinLandlordActionState.PricingReady => "已取得定价",
                 YouPinLandlordActionState.Planned => "等待执行",
                 YouPinLandlordActionState.Executing => "正在改价",
+                YouPinLandlordActionState.WaitingForRateLimit => "限流等待，稍后自动重试",
                 YouPinLandlordActionState.AwaitingSynchronization => "等待平台同步",
                 YouPinLandlordActionState.Rechecking => "正在回查",
                 _ => "正在处理"
             };
+        }
+
+        internal static string FormatRepriceFailure(string operation, Exception exception)
+        {
+            string message = YouPinMobileApiClient.Sanitize(exception.Message);
+            return string.IsNullOrWhiteSpace(message)
+                ? $"{operation}：{exception.GetType().Name}"
+                : $"{operation}：{exception.GetType().Name}；{message}";
         }
 
         private static string FormatInventoryPricingFailure(Exception exception)

@@ -35,12 +35,16 @@ namespace CS2TradeMonitor.src.UI.Framework
 
     public static class SettingsPageRegistry
     {
+        public const string DefaultRouteKey = "Console";
+
         private static readonly SettingsPageRoute[] Routes =
         {
             // SettingsForm is the production shell. Pages below must be Framework hosts.
-            new("Console", () => "🧭 控制台", typeof(ConsoleHostPage), () => new ConsoleHostPage()),
+            new("Console", () => "🖥️ 控制台", typeof(ConsoleHostPage), () => new ConsoleHostPage()),
             new("MainPanel", () => "🖥️ " + LanguageManager.T("Menu.MainFormSettings"), typeof(MainPanelHostPage), () => new MainPanelHostPage()),
             new("ItemMonitor", () => "📦 单品监控", typeof(ItemMonitorHostPage), () => new ItemMonitorHostPage()),
+            new("LocalInventoryMonitor", () => "🔎 库存监控", typeof(LocalInventoryMonitorHostPage), () => new LocalInventoryMonitorHostPage()),
+            new("YouPinPurchaseMonitor", () => "🛒 求购监控", typeof(YouPinPurchaseMonitorHostPage), () => new YouPinPurchaseMonitorHostPage()),
             new("YouPin", () => "🔔 悠悠有品", typeof(YouPinCcHostPage), () => new YouPinCcHostPage()),
             new("YouPinStopProfitLoss", () => "🎯 库存止损/盈", typeof(YouPinStopProfitLossRedesignHostPage), () => new YouPinStopProfitLossRedesignHostPage()),
             new("SteamOffers", () => "🧾 Steam报价", typeof(SteamOfferRedesignHostPage), () => new SteamOfferRedesignHostPage()),
@@ -84,6 +88,13 @@ namespace CS2TradeMonitor.src.UI.Framework
             Routes.ToDictionary(route => route.Key, StringComparer.OrdinalIgnoreCase);
 
         public static IReadOnlyList<SettingsPageRoute> NavigationRoutes => Routes;
+
+        public static string NormalizeInitialKey(string? key)
+        {
+            return string.IsNullOrWhiteSpace(key)
+                ? DefaultRouteKey
+                : NormalizeKey(key);
+        }
 
         public static string NormalizeKey(string key)
         {

@@ -7,6 +7,7 @@ using System.Drawing.Text;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using CS2TradeMonitor.Shared.Core;
 
 namespace CS2TradeMonitor.src.Core
 {
@@ -20,23 +21,14 @@ namespace CS2TradeMonitor.src.Core
         // ============================================================
         // 1. String Interning (Memory Optimization)
         // ============================================================
-        private static readonly Dictionary<string, string> _stringPool = new(StringComparer.Ordinal);
-        private static readonly object _poolLock = new object();
-
         public static string Intern(string str)
         {
-            if (string.IsNullOrEmpty(str)) return string.Empty;
-            lock (_poolLock)
-            {
-                if (_stringPool.TryGetValue(str, out var pooled)) return pooled;
-                _stringPool[str] = str;
-                return str;
-            }
+            return PortableStringPool.Intern(str);
         }
 
         public static void ClearStringPool()
         {
-            lock (_poolLock) _stringPool.Clear();
+            PortableStringPool.Clear();
         }
 
         // ============================================================

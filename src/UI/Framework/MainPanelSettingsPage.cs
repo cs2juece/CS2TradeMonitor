@@ -772,9 +772,23 @@ namespace CS2TradeMonitor.src.UI.Framework
             var previewValue = CreateLabel(BuildInventoryPreviewText(), 18, 42, 300, 34, UIFonts.Bold(16f), ParseColor(Get(nameof(Settings.YouPinTrendIndicatorProfitColor), "#DC465A"), UIColors.Negative));
             preview.Controls.Add(previewValue);
             RegisterRefresh(() => previewValue.Text = BuildInventoryPreviewText());
-            preview.Controls.Add(CreateLabel("库存今日盈亏", 18, 78, 160, 24, UIFonts.Regular(9f), UIColors.TextSub));
-            preview.Controls.Add(CreateLabeledSwitch("悬浮窗", 190, 78, nameof(Settings.YouPinTrendIndicatorVisibleInPanel), true, _ => ReloadRuntimeDisplay()));
-            preview.Controls.Add(CreateLabeledSwitch("任务栏", 300, 78, nameof(Settings.YouPinTrendIndicatorVisibleInTaskbar), true, _ => ReloadRuntimeDisplay()));
+            var inventoryLabel = CreateLabel("库存今日盈亏", 18, 78, 160, 24, UIFonts.Regular(9f), UIColors.TextSub);
+            var floatingSwitch = CreateLabeledSwitch("悬浮窗", 190, 78, nameof(Settings.YouPinTrendIndicatorVisibleInPanel), true, _ => ReloadRuntimeDisplay());
+            var taskbarSwitch = CreateLabeledSwitch("任务栏", 300, 78, nameof(Settings.YouPinTrendIndicatorVisibleInTaskbar), true, _ => ReloadRuntimeDisplay());
+            preview.Controls.Add(inventoryLabel);
+            preview.Controls.Add(floatingSwitch);
+            preview.Controls.Add(taskbarSwitch);
+
+            void LayoutPreviewFooter()
+            {
+                InventoryPreviewFooterLayout layout = MainPanelSettingsPageModel.BuildInventoryPreviewFooterLayout(preview.ClientSize.Width);
+                inventoryLabel.Bounds = layout.LabelBounds;
+                floatingSwitch.Bounds = layout.FloatingSwitchBounds;
+                taskbarSwitch.Bounds = layout.TaskbarSwitchBounds;
+            }
+
+            preview.SizeChanged += (_, __) => LayoutPreviewFooter();
+            LayoutPreviewFooter();
 
             var style = CreateInnerCard();
             style.SetBounds(innerLeft + innerWidth + innerGap, innerTop, innerWidth, UIUtils.S(122));
@@ -1094,7 +1108,13 @@ namespace CS2TradeMonitor.src.UI.Framework
             sw.Left = 0;
             sw.Top = UIUtils.S(2);
             panel.Controls.Add(sw);
-            panel.Controls.Add(CreateLabel(text, 50, 0, 58, 26, UIFonts.Bold(9f), UIColors.TextMain));
+            var label = CreateLabel(text, 50, 0, 58, 26, UIFonts.Bold(9f), UIColors.TextMain);
+            panel.Controls.Add(label);
+            panel.Layout += (_, __) => label.SetBounds(
+                UIUtils.S(50),
+                0,
+                Math.Max(1, panel.ClientSize.Width - UIUtils.S(50)),
+                UIUtils.S(26));
             return panel;
         }
 

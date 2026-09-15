@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CS2QuantWeb", "CS2QuantWeb\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CS2MarketData.Core", "CS2MarketData.Core\CS2MarketData.Core.csproj", "{6EA6D135-62CF-43F4-A977-3027A6D386E6}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CS2TradeMonitor.Shared", "CS2TradeMonitor.Shared.csproj", "{E3E795B3-11A4-4903-BB26-8274A9D1E011}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{6EA6D135-62CF-43F4-A977-3027A6D386E6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6EA6D135-62CF-43F4-A977-3027A6D386E6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6EA6D135-62CF-43F4-A977-3027A6D386E6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E3E795B3-11A4-4903-BB26-8274A9D1E011}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E3E795B3-11A4-4903-BB26-8274A9D1E011}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E3E795B3-11A4-4903-BB26-8274A9D1E011}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E3E795B3-11A4-4903-BB26-8274A9D1E011}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,5 +1,4 @@
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.SystemServices;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,7 +10,7 @@ namespace CS2TradeMonitor.Application.YouPin
     {
         private const int MaxHistoryItems = 1000;
 
-        public static void PruneHistory(YouPinSaleReminderHistory history)
+        public static void PruneHistory(YouPinSaleReminderHistory history, Action<string>? logInfo = null)
         {
             try
             {
@@ -26,7 +25,7 @@ namespace CS2TradeMonitor.Application.YouPin
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Info("YouPinTodo", $"历史裁剪跳过: {ex.Message}");
+                logInfo?.Invoke($"历史裁剪跳过: {ex.Message}");
             }
         }
 

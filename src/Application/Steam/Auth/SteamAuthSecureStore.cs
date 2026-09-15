@@ -4,24 +4,50 @@ using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Application.Steam;
 using CS2TradeMonitor.Application.Steam.Auth;
 using CS2TradeMonitor.Domain.Steam;
-using CS2TradeMonitor.src.SystemServices;
 
 namespace CS2TradeMonitor.Application.Steam.Auth
 {
     public sealed class SteamAuthSecureStore : ISteamAuthStore
     {
-        public static SteamAuthSecureStore Instance { get; } = new();
+        private static readonly object InstanceGate = new();
+        private static Func<ISteamTokenVault>? _platformFactory;
+        private static SteamAuthSecureStore? _instance;
         private readonly ISteamTokenVault _tokenVault;
 
         public string CredentialPath => _tokenVault.CredentialPath;
         public string LegacyCredentialPath => _tokenVault.LegacyCredentialPath;
 
-        private SteamAuthSecureStore()
-            : this(SteamServiceRuntimeServices.ResolveTokenVault())
+        public static SteamAuthSecureStore Instance
         {
+            get
+            {
+                lock (InstanceGate)
+                {
+                    if (_instance is not null)
+                        return _instance;
+                    if (_platformFactory is null)
+                        throw new InvalidOperationException("Steam 凭据平台宿主尚未配置。");
+
+                    _instance = new SteamAuthSecureStore(_platformFactory());
+                    return _instance;
+                }
+            }
         }
 
-        internal SteamAuthSecureStore(ISteamTokenVault tokenVault)
+        public static void ConfigurePlatform(Func<ISteamTokenVault> factory)
+        {
+            ArgumentNullException.ThrowIfNull(factory);
+            lock (InstanceGate)
+            {
+                if (_instance is null)
+                    _platformFactory = factory;
+            }
+        }
+
+        public static SteamAuthSecureStore Create(ISteamTokenVault tokenVault)
+            => new(tokenVault);
+
+        public SteamAuthSecureStore(ISteamTokenVault tokenVault)
         {
             _tokenVault = tokenVault ?? throw new ArgumentNullException(nameof(tokenVault));
         }
@@ -128,8 +154,8 @@ namespace CS2TradeMonitor.Application.Steam.Auth
                 PersonaName = (credential.PersonaName ?? "").Trim(),
                 AccountName = string.IsNullOrWhiteSpace(credential.AccountName) ? "未命名令牌" : credential.AccountName.Trim(),
                 LoginAccountName = MaskAccount(credential.LoginAccountName),
-                SteamId = MaskSteamId(credential.SteamId),
-                DeviceId = MaskTail(credential.DeviceId, 4),
+                SteamId = SteamCredentialMasker.MaskSteamId(credential.SteamId),
+                DeviceId = SteamCredentialMasker.MaskTail(credential.DeviceId, 4),
                 SavedAt = credential.SavedAt,
                 SessionSavedAt = credential.SessionSavedAt,
                 LastAutoReloginAt = credential.LastAutoReloginAt,
@@ -152,9 +178,7 @@ namespace CS2TradeMonitor.Application.Steam.Auth
 
         public static string MaskSteamId(string? value)
         {
-            string text = (value ?? "").Trim();
-            if (text.Length <= 6) return MaskTail(text, 2);
-            return text[..3] + "****" + text[^4..];
+            return SteamCredentialMasker.MaskSteamId(value);
         }
 
         public static string MaskAccount(string? value)
@@ -228,25 +252,4 @@ namespace CS2TradeMonitor.Application.Steam.Auth
         }
     }
 
-    public sealed class SteamAuthStoreStatus
-    {
-        public bool HasCredential { get; set; }
-        public bool HasSecrets { get; set; }
-        public bool HasSession { get; set; }
-        public bool HasAutoLogin { get; set; }
-        public bool HasAccessToken { get; set; }
-        public bool HasRefreshToken { get; set; }
-        public string AccountName { get; set; } = "";
-        public string PersonaName { get; set; } = "";
-        public string LoginAccountName { get; set; } = "";
-        public string SteamId { get; set; } = "";
-        public string DeviceId { get; set; } = "";
-        public DateTime SavedAt { get; set; }
-        public DateTime SessionSavedAt { get; set; }
-        public DateTime LastAutoReloginAt { get; set; }
-        public string LastAutoReloginResult { get; set; } = "";
-        public DateTime AutoReloginCooldownUntil { get; set; }
-        public string Message { get; set; } = "";
-        public string Error { get; set; } = "";
-    }
 }

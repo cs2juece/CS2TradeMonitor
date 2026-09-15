@@ -9,7 +9,7 @@ using static CS2TradeMonitor.Application.YouPin.YouPinJsonElementReader;
 
 namespace CS2TradeMonitor.Infrastructure.YouPin
 {
-    internal sealed class YouPinInventoryStorageHttpAdapter : IYouPinInventoryStorageAdapter, IDisposable
+    public sealed class YouPinInventoryStorageHttpAdapter : IYouPinInventoryStorageAdapter, IDisposable
     {
         internal const string CaptureAlignedAppVersion = "5.46.1";
         internal const string CaptureAlignedWebViewVersion = "149.0.7827.159";

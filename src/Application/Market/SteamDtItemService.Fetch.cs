@@ -15,6 +15,7 @@ using CS2TradeMonitor.Application.Monitoring;
 using CS2TradeMonitor.src.SystemServices;
 using CS2TradeMonitor.src.Core.Refresh;
 using CS2TradeMonitor.Domain.Market;
+using CS2TradeMonitor.Shared.Market;
 using CS2MarketData.Core;
 using static CS2TradeMonitor.Application.Market.SteamDtItemJsonParser;
 
@@ -382,101 +383,29 @@ namespace CS2TradeMonitor.Application.Market
 
         private static void EvaluateItemPriceAlert(ItemMonitorConfig item, SteamDtItemData data)
         {
-            if (data.Price <= 0)
-                return;
-
-            var now = DateTime.Now;
-            long nowMs = new DateTimeOffset(now).ToUnixTimeMilliseconds();
             var defaults = MarketDataSourceRuntimeServices.Resolve().AppConfigState.ItemMonitor;
-            int defaultWindowMinutes = defaults.DefaultAlertWindowMinutes > 0 ? defaults.DefaultAlertWindowMinutes : 10;
-            int defaultCooldownMinutes = defaults.DefaultAlertCooldownMinutes > 0 ? defaults.DefaultAlertCooldownMinutes : 10;
-            double defaultRisePercent = defaults.DefaultAlertRisePercent > 0 ? defaults.DefaultAlertRisePercent : 0;
-            double defaultFallPercent = defaults.DefaultAlertFallPercent > 0 ? defaults.DefaultAlertFallPercent : 0;
-            int windowMinutes = Math.Clamp(item.PriceAlertWindowMinutes > 0 ? item.PriceAlertWindowMinutes : defaultWindowMinutes, 1, 10080);
-            int cooldownMinutes = Math.Clamp(item.PriceAlertCooldownMinutes > 0 ? item.PriceAlertCooldownMinutes : defaultCooldownMinutes, 1, 1440);
-            double risePercentThreshold = item.PriceAlertRisePercent > 0 ? item.PriceAlertRisePercent : defaultRisePercent;
-            double fallPercentThreshold = item.PriceAlertFallPercent > 0 ? item.PriceAlertFallPercent : defaultFallPercent;
-            ItemPriceAlertTriggerMode triggerMode = ItemPriceAlertPolicy.ResolveTriggerMode(item);
-
-            var baselineTime = UnixMsToLocalTime(item.PriceAlertBaselineTime);
-            bool baselineMissing = item.PriceAlertBaselinePrice <= 0 || baselineTime == DateTime.MinValue;
-            bool baselineExpired = !baselineMissing && now - baselineTime > TimeSpan.FromMinutes(windowMinutes);
-            if (baselineMissing || baselineExpired)
-            {
-                item.PriceAlertBaselinePrice = data.Price;
-                item.PriceAlertBaselineTime = nowMs;
-            }
-
-            if (!item.PriceAlertDesktopEnabled && !item.PriceAlertPhoneEnabled)
+            ItemPriceAlertDecision? decision = ItemPriceAlertEvaluator.Evaluate(
+                item,
+                data.Price,
+                DateTimeOffset.Now,
+                new ItemPriceAlertDefaults(
+                    defaults.DefaultAlertWindowMinutes,
+                    defaults.DefaultAlertCooldownMinutes,
+                    defaults.DefaultAlertRisePercent,
+                    defaults.DefaultAlertFallPercent));
+            if (decision is null)
                 return;
-
-            var reasons = new List<string>();
-            if (triggerMode == ItemPriceAlertTriggerMode.Breakthrough)
-            {
-                if (item.PriceAlertAbove > 0 && data.Price >= item.PriceAlertAbove)
-                    reasons.Add($"高于 ¥{item.PriceAlertAbove:F2}");
-                if (item.PriceAlertBelow > 0 && data.Price <= item.PriceAlertBelow)
-                    reasons.Add($"低于 ¥{item.PriceAlertBelow:F2}");
-            }
-
-            if (triggerMode == ItemPriceAlertTriggerMode.Percent && item.PriceAlertBaselinePrice > 0)
-            {
-                double percent = (data.Price - item.PriceAlertBaselinePrice) / item.PriceAlertBaselinePrice * 100.0;
-                if (risePercentThreshold > 0 && percent >= risePercentThreshold)
-                    reasons.Add($"{windowMinutes} 分钟内上涨 {percent:F2}%");
-                if (fallPercentThreshold > 0 && percent <= -fallPercentThreshold)
-                    reasons.Add($"{windowMinutes} 分钟内下跌 {Math.Abs(percent):F2}%");
-            }
-
-            if (reasons.Count == 0)
-                return;
-
-            var lastTrigger = UnixMsToLocalTime(item.PriceAlertLastTriggerTime);
-            if (lastTrigger != DateTime.MinValue && now - lastTrigger < TimeSpan.FromMinutes(cooldownMinutes))
-                return;
-
-            string reasonText = string.Join("；", reasons);
-            item.PriceAlertLastTriggerTime = nowMs;
-            item.PriceAlertLastMessage = $"{now:MM-dd HH:mm:ss} {reasonText}";
-            item.PriceAlertBaselinePrice = data.Price;
-            item.PriceAlertBaselineTime = nowMs;
-
-            NotifyItemPriceAlert(item, data, reasonText);
-        }
-
-
-        private static DateTime UnixMsToLocalTime(long unixMs)
-        {
-            if (unixMs <= 0)
-                return DateTime.MinValue;
-            try
-            {
-                return DateTimeOffset.FromUnixTimeMilliseconds(unixMs).LocalDateTime;
-            }
-            catch
-            {
-                return DateTime.MinValue;
-            }
-        }
-
-
-        private static void NotifyItemPriceAlert(ItemMonitorConfig item, SteamDtItemData data, string reason)
-        {
             if (MarketDataSourceRuntimeServices.Resolve().AppConfigState.Notifications.DoNotDisturbEnabled)
                 return;
-
-            string title = "单品价格提醒";
-            string name = string.IsNullOrWhiteSpace(item.Name) ? item.ItemId : item.Name;
-            string message = $"{name}\n当前 ¥{data.Price:F2}，{reason}";
             AppNotificationHub.Instance.Request(
-                title,
-                message,
+                decision.Title,
+                decision.Message,
                 AppNotificationSeverity.Warning,
                 AppNotificationPlacement.BottomLeft,
-                playSound: item.PriceAlertDesktopEnabled,
-                showToast: item.PriceAlertDesktopEnabled,
+                playSound: decision.DesktopEnabled,
+                showToast: decision.DesktopEnabled,
                 source: AlertHistorySources.Item,
-                sendToPhone: item.PriceAlertPhoneEnabled);
+                sendToPhone: decision.PhoneEnabled);
         }
 
 

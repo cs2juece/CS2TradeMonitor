@@ -1,5 +1,6 @@
 using CS2TradeMonitor.src.Core;
 using CS2TradeMonitor.src.UI.Controls;
+using CS2TradeMonitor.Shared.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -102,6 +103,24 @@ namespace CS2TradeMonitor.src.UI.Framework
             };
         }
 
+        public static InventoryPreviewFooterLayout BuildInventoryPreviewFooterLayout(int previewWidth)
+        {
+            int pad = UIUtils.S(18);
+            int gap = UIUtils.S(8);
+            int availableWidth = Math.Max(3, previewWidth - pad * 2);
+            int minimumLabelWidth = UIUtils.S(72);
+            int switchWidth = Math.Min(
+                UIUtils.S(96),
+                Math.Max(1, (availableWidth - minimumLabelWidth - gap * 2) / 2));
+            int labelWidth = Math.Max(1, availableWidth - switchWidth * 2 - gap * 2);
+            int top = UIUtils.S(78);
+            int height = UIUtils.S(28);
+            var labelBounds = new Rectangle(pad, top, labelWidth, UIUtils.S(24));
+            var floatingBounds = new Rectangle(labelBounds.Right + gap, top, switchWidth, height);
+            var taskbarBounds = new Rectangle(floatingBounds.Right + gap, top, switchWidth, height);
+            return new InventoryPreviewFooterLayout(labelBounds, floatingBounds, taskbarBounds);
+        }
+
         public static string FormatColorHtml(Color color)
         {
             return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
@@ -194,19 +213,13 @@ namespace CS2TradeMonitor.src.UI.Framework
                 if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
                     value = TryParseDouble(fallback, 0d);
 
-                return ItemMonitorListCardModel.NormalizeDefaultPercent(value);
+                return InterfaceSettingsRules.NormalizeValue(key, value);
             }
 
             if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int intValue))
                 intValue = TryParseInt(fallback, 0);
 
-            return key switch
-            {
-                nameof(Settings.DefaultItemRefreshIntervalSec) => ItemMonitorListCardModel.NormalizeDefaultInterval(intValue),
-                nameof(Settings.DefaultItemPriceAlertWindowMinutes) => ItemMonitorListCardModel.NormalizeDefaultWindowMinutes(intValue),
-                nameof(Settings.DefaultItemPriceAlertCooldownMinutes) => ItemMonitorListCardModel.NormalizeDefaultCooldownMinutes(intValue),
-                _ => intValue
-            };
+            return InterfaceSettingsRules.NormalizeValue(key, intValue);
         }
 
         private static int TryParseInt(string text, int fallback)
@@ -246,4 +259,9 @@ namespace CS2TradeMonitor.src.UI.Framework
                 StringComparison.OrdinalIgnoreCase);
         }
     }
+
+    internal readonly record struct InventoryPreviewFooterLayout(
+        Rectangle LabelBounds,
+        Rectangle FloatingSwitchBounds,
+        Rectangle TaskbarSwitchBounds);
 }

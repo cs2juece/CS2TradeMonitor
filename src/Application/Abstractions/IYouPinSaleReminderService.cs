@@ -1,31 +1,21 @@
 using CS2TradeMonitor.Application.YouPin;
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Trading;
 
 namespace CS2TradeMonitor.Application.Abstractions
 {
-    public interface IYouPinSaleReminderService : IDisposable
+    public interface IYouPinSaleReminderService : IDisposable, IAutoConfirmationYouPinGateway
     {
         event Action? DataUpdated;
-        event Action<IReadOnlyList<YouPinSaleOrder>>? NewWaitDeliverOrdersDetected;
-
         void Configure(Settings settings);
 
-        YouPinSaleReminderState GetState();
+        void ConfigureForExternalScheduler(Settings settings);
+
+        Task RunDueChecksAsync();
 
         Task<YouPinSaleReminderCheckResult> CheckTodoNowAsync(bool useMock = false, bool notify = true);
 
-        Task<YouPinSaleReminderCheckResult> CheckQuoteNowAsync(string trigger = "立即刷新");
-
         Task<YouPinSaleReminderCheckResult> CheckMsgCenterNowAsync(bool useMock = false, bool notify = true);
-
-        Task<YouPinSaleActionResult> SendOfferAsync(string orderNo, string trigger = "用户手动");
-
-        Task<YouPinSaleActionResult> ConfirmOfferAsync(string orderNo, string tradeOfferId = "", string trigger = "用户手动");
-
-        Task<YouPinSaleActionResult> QueryOfferStatusAsync(string orderNo, string trigger = "用户手动");
-
-        Task<YouPinSaleActionResult> QueryTradeOfferIdAsync(string orderNo);
 
         Task<YouPinSaleOrder> EnrichOrderDetailAsync(YouPinSaleOrder order);
 

@@ -367,7 +367,7 @@ namespace CS2TradeMonitor.src.UI
 
             float outerPad = Math.Max(2f, UIUtils.S(3));
             float borderWidth = Math.Max(1.2f, UIUtils.S(1));
-            float trackHeight = Math.Min(Height - outerPad * 2f, UIUtils.S(30));
+            float trackHeight = Math.Min(Height - outerPad * 2f, UIUtils.S(40));
             float trackWidth = Math.Max(UIUtils.S(140), Width - outerPad * 2f);
             var track = new RectangleF(
                 (Width - trackWidth) / 2f,

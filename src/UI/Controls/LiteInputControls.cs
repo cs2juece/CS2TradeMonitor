@@ -56,7 +56,8 @@ namespace CS2TradeMonitor.src.UI.Controls
             // ★★★ 修改：Size/Padding 缩放
             this.Size = new Size(UIUtils.S(width), UIUtils.S(26));
             this.BackColor = UIColors.InputBg;
-            this.Padding = UIUtils.S(new Padding(0, 2, 0, 3));
+            this.Padding = UIUtils.S(new Padding(6, 2, 6, 3));
+            LiteCorners.Clip(this);
             this.Cursor = Cursors.IBeam;
 
             // 1. 创建并添加输入框 (垫底)
@@ -206,16 +207,10 @@ namespace CS2TradeMonitor.src.UI.Controls
                 e.Graphics.FillRectangle(bg, ClientRectangle);
 
             var c = Inner.Focused ? UIColors.Primary : UIColors.Border;
-            int h = Inner.Focused ? 2 : 1;
-
-            // 画线逻辑：如果有左侧标签，线条从标签右侧开始画
-            int startX = 0;
-            if (_lblLabel != null) startX = _lblLabel.Width;
-            int drawWidth = this.Width - startX;
-
-            // 线条画在底部 (Height - h)
-            using (var b = new SolidBrush(c))
-                e.Graphics.FillRectangle(b, startX, Height - h, drawWidth, h);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var path = LiteCorners.Path(new Rectangle(0, 0, Width - 1, Height - 1), UIUtils.S(LiteCorners.Radius));
+            using var pen = new Pen(c);
+            e.Graphics.DrawPath(pen, path);
         }
     }
 
@@ -432,6 +427,7 @@ namespace CS2TradeMonitor.src.UI.Controls
             this.BackColor = UIColors.InputBg;
             this.Padding = new Padding(1);
             this.DoubleBuffered = true;
+            LiteCorners.Clip(this);
 
             Inner = new NoScrollComboBox
             {
@@ -516,7 +512,11 @@ namespace CS2TradeMonitor.src.UI.Controls
                 }
 
                 using (var p = new Pen(borderColor))
-                    e.Graphics.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    using var path = LiteCorners.Path(new Rectangle(0, 0, Width - 1, Height - 1), UIUtils.S(LiteCorners.Radius));
+                    e.Graphics.DrawPath(p, path);
+                }
             };
         }
 

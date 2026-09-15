@@ -486,6 +486,10 @@ namespace CS2TradeMonitor
             s.UIScale = Math.Clamp(s.UIScale, 0.5, 2.0);
             s.SettingsPanelWindowWidth = Math.Max(0, s.SettingsPanelWindowWidth);
             s.SettingsPanelWindowHeight = Math.Max(0, s.SettingsPanelWindowHeight);
+            s.SettingsPanelWindowPlacementVersion = Math.Clamp(
+                s.SettingsPanelWindowPlacementVersion,
+                0,
+                Settings.CurrentSettingsPanelWindowPlacementVersion);
             if (s.SettingsPanelWindowWidth == 0 || s.SettingsPanelWindowHeight == 0)
             {
                 s.SettingsPanelWindowWidth = 0;
@@ -498,6 +502,9 @@ namespace CS2TradeMonitor
                 s.CsqaqRefreshSec = Settings.DefaultMarketRefreshSec;
             s.SteamDtRefreshSec = Math.Max(Settings.DefaultMarketRefreshSec, s.SteamDtRefreshSec);
             s.CsqaqRefreshSec = Math.Max(Settings.DefaultMarketRefreshSec, s.CsqaqRefreshSec);
+            s.LocalInventoryRefreshMinutes = Math.Clamp(s.LocalInventoryRefreshMinutes <= 0 ? 5 : s.LocalInventoryRefreshMinutes, 5, 1440);
+            s.LocalInventoryMinimumChangeCount = Math.Clamp(s.LocalInventoryMinimumChangeCount <= 0 ? 1 : s.LocalInventoryMinimumChangeCount, 1, 100000);
+            s.LocalInventoryWatchList = CS2TradeMonitor.Domain.InventoryMonitoring.LocalInventoryWatchListParser.Normalize(s.LocalInventoryWatchList);
             if (!Enum.IsDefined(typeof(MarketAlertNotificationMode), s.MarketAlertNotificationMode)
                 || s.MarketAlertNotificationMode == MarketAlertNotificationMode.InAppToast)
             {
@@ -863,6 +870,7 @@ namespace CS2TradeMonitor
             decimal minimum,
             decimal maximum)
         {
+            if (minimum == 0m && maximum == 0m) return (0m, 1500m);
             minimum = Math.Max(0m, minimum);
             maximum = Math.Max(0m, maximum);
             return minimum <= maximum

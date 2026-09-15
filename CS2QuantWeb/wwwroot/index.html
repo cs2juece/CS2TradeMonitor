@@ -287,12 +287,18 @@
         <section>
           <div class="rule-heading"><h3>买入条件</h3><select id="entryMatchMode"><option value="All">满足全部（AND）</option><option value="Any">满足任一（OR）</option></select></div>
           <div id="entryConditions" class="condition-list"></div>
-          <button class="condition-add" data-side="entry" type="button">添加买入条件</button>
+          <div class="condition-actions">
+            <select class="condition-preset" data-condition-preset data-side="entry" aria-label="快捷添加买入指标条件"></select>
+            <button class="condition-add" data-side="entry" type="button">添加基础条件</button>
+          </div>
         </section>
         <section>
           <div class="rule-heading"><h3>卖出条件</h3><select id="exitMatchMode"><option value="All">满足全部（AND）</option><option value="Any">满足任一（OR）</option></select></div>
           <div id="exitConditions" class="condition-list"></div>
-          <button class="condition-add" data-side="exit" type="button">添加卖出条件</button>
+          <div class="condition-actions">
+            <select class="condition-preset" data-condition-preset data-side="exit" aria-label="快捷添加卖出指标条件"></select>
+            <button class="condition-add" data-side="exit" type="button">添加基础条件</button>
+          </div>
         </section>
       </div>
       <footer>

@@ -572,7 +572,9 @@ tbody tr:hover, tbody tr:focus-visible { background: var(--card-muted); }
 .condition-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) 92px minmax(110px, 1fr) 52px; gap: 6px; align-items: center; }
 .condition-row select, .condition-row input { min-width: 0; min-height: 36px; }
 .condition-remove { width: 52px; height: 36px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); color: var(--negative); cursor: pointer; }
-.condition-add { width: 100%; margin-top: 10px; min-height: 36px; border: 1px dashed var(--border); border-radius: 7px; background: transparent; color: var(--primary); cursor: pointer; }
+.condition-actions { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(120px, .8fr); gap: 8px; margin-top: 10px; }
+.condition-preset, .condition-add { width: 100%; min-width: 0; min-height: 36px; }
+.condition-add { border: 1px dashed var(--border); border-radius: 7px; background: transparent; color: var(--primary); cursor: pointer; }
 
 @media (max-width: 1040px) {
   .summary-grid { grid-template-columns: repeat(3, 1fr); }
@@ -646,6 +648,7 @@ tbody tr:hover, tbody tr:focus-visible { background: var(--card-muted); }
   .dialog-shell > footer { align-items: flex-start; flex-direction: column; }
   .condition-row { grid-template-columns: 1fr 84px; }
   .condition-row .condition-right { grid-column: 1 / -1; }
+  .condition-actions { grid-template-columns: 1fr; }
   .parameter-fields label, .strategy-topline label { grid-template-columns: 1fr; gap: 5px; }
   .disclaimer { flex-direction: column; }
 }

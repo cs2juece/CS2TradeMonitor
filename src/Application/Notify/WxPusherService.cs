@@ -1,11 +1,12 @@
 using System;
 using System.Net;
 using System.Net.Http;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CS2TradeMonitor.Application.Abstractions;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.Shared.Notifications;
 
 namespace CS2TradeMonitor.Application.Notify
 {
@@ -25,21 +26,25 @@ namespace CS2TradeMonitor.Application.Notify
         private const string SendEndpointPrefix = NotificationProviderUrls.WxPusherSendMessagePrefix;
         public const string SptHelpUrl = NotificationProviderUrls.WxPusherDocs;
 
-        private static readonly Lazy<WxPusherService> LazyInstance = new(() => new WxPusherService());
+        private static readonly Lazy<WxPusherService> LazyInstance = new(NotificationCorePlatform.CreateWxPusher);
         public static WxPusherService Instance => LazyInstance.Value;
 
         private readonly HttpClient _httpClient;
+        private readonly INotificationCoreHost _host;
 
-        private WxPusherService()
-            : this(NotifyRuntimeServices.ResolveDomesticHttpFactory())
+        internal WxPusherService(IDomesticHttpClientFactory httpFactory)
+            : this(httpFactory, NoopNotificationCoreHost.Instance)
         {
         }
 
-        internal WxPusherService(IDomesticHttpClientFactory httpFactory)
+        internal WxPusherService(
+            IDomesticHttpClientFactory httpFactory,
+            INotificationCoreHost host)
         {
             if (httpFactory == null) throw new ArgumentNullException(nameof(httpFactory));
 
             _httpClient = httpFactory.Create(10);
+            _host = host ?? throw new ArgumentNullException(nameof(host));
         }
 
         public Task<WxPusherSendResult> SendConfiguredAsync(Settings cfg, string title, string message, CancellationToken cancellationToken = default)
@@ -180,10 +185,16 @@ namespace CS2TradeMonitor.Application.Notify
             return "";
         }
 
-        private static void LogFailure(string reason)
+        private void LogFailure(string reason)
         {
-            DiagnosticsLogger.Error("WxPusher", "WxPusher send failed: " + DiagnosticsLogger.Redact(reason));
+            _host.Error("WxPusher", "send-failed:" + NormalizeDiagnosticCode(reason));
         }
+
+        private static string NormalizeDiagnosticCode(string reason)
+            => string.Concat((reason ?? string.Empty)
+                .Where(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or ' '))
+                .Trim()
+                .Replace(' ', '-');
 
         private readonly record struct ApiParseResult(bool Success, int? Code, string Message);
     }

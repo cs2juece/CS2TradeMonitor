@@ -1,6 +1,6 @@
 using CS2TradeMonitor.Application.Abstractions;
 using CS2TradeMonitor.Domain.YouPin;
-using CS2TradeMonitor.src.SystemServices;
+using CS2TradeMonitor.src.Core;
 
 namespace CS2TradeMonitor.Application.YouPin
 {
@@ -19,6 +19,7 @@ namespace CS2TradeMonitor.Application.YouPin
         private readonly IYouPinGridExecutionJournal? _executionJournal;
         private readonly YouPinGridExecutionModule? _executionModule;
         private readonly Func<DateTime> _now;
+        private readonly bool _usesInventoryRefreshConsumer;
         private readonly SemaphoreSlim _refreshGate = new(1, 1);
         private readonly object _stateLock = new();
         private YouPinGridState _state;
@@ -40,14 +41,16 @@ namespace CS2TradeMonitor.Application.YouPin
             IYouPinGridMarketGateway marketGateway,
             IYouPinInventoryService inventoryService,
             IYouPinGridExecutionJournal executionJournal,
-            YouPinGridExecutionModule executionModule)
+            YouPinGridExecutionModule executionModule,
+            bool usesInventoryRefreshConsumer = true)
             : this(
                 store,
                 marketGateway,
                 inventoryService,
                 executionJournal,
                 executionModule,
-                () => DateTime.Now)
+                () => DateTime.Now,
+                usesInventoryRefreshConsumer)
         {
         }
 
@@ -56,7 +59,7 @@ namespace CS2TradeMonitor.Application.YouPin
             IYouPinGridMarketGateway marketGateway,
             IYouPinInventoryService inventoryService,
             Func<DateTime> now)
-            : this(store, marketGateway, inventoryService, null, null, now)
+            : this(store, marketGateway, inventoryService, null, null, now, true)
         {
         }
 
@@ -66,7 +69,8 @@ namespace CS2TradeMonitor.Application.YouPin
             IYouPinInventoryService inventoryService,
             IYouPinGridExecutionJournal? executionJournal,
             YouPinGridExecutionModule? executionModule,
-            Func<DateTime> now)
+            Func<DateTime> now,
+            bool usesInventoryRefreshConsumer = true)
         {
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _marketGateway = marketGateway ?? throw new ArgumentNullException(nameof(marketGateway));
@@ -74,9 +78,11 @@ namespace CS2TradeMonitor.Application.YouPin
             _executionJournal = executionJournal;
             _executionModule = executionModule;
             _now = now ?? throw new ArgumentNullException(nameof(now));
+            _usesInventoryRefreshConsumer = usesInventoryRefreshConsumer;
             _state = CloneState(_store.Load());
             _snapshot = BuildUnrefreshedSnapshot(_state.Strategies);
-            _inventoryService.DataUpdated += OnInventoryDataUpdated;
+            if (_usesInventoryRefreshConsumer)
+                _inventoryService.DataUpdated += OnInventoryDataUpdated;
         }
 
         public event Action? DataUpdated;
@@ -509,6 +515,8 @@ namespace CS2TradeMonitor.Application.YouPin
 
         private void UpdateInventoryRefreshRegistrationLocked()
         {
+            if (!_usesInventoryRefreshConsumer)
+                return;
             bool shouldRun = _executionModule != null
                 && _settings != null
                 && HasBackgroundWorkLocked();
@@ -572,9 +580,8 @@ namespace CS2TradeMonitor.Application.YouPin
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.Error(
-                    "YouPinGrid",
-                    "悠悠交易网格后台检查失败：" + YouPinMobileApiClient.Sanitize(ex.Message));
+                System.Diagnostics.Trace.TraceError(
+                    "YouPinGrid background refresh failed: " + YouPinMobileApiClient.Sanitize(ex.Message));
             }
             finally
             {
@@ -635,9 +642,12 @@ namespace CS2TradeMonitor.Application.YouPin
 
         public void Dispose()
         {
-            _inventoryService.DataUpdated -= OnInventoryDataUpdated;
-            lock (_stateLock)
-                _inventoryService.SetBackgroundRefreshConsumer(InventoryRefreshConsumerKey, null);
+            if (_usesInventoryRefreshConsumer)
+            {
+                _inventoryService.DataUpdated -= OnInventoryDataUpdated;
+                lock (_stateLock)
+                    _inventoryService.SetBackgroundRefreshConsumer(InventoryRefreshConsumerKey, null);
+            }
             _refreshGate.Dispose();
         }
     }

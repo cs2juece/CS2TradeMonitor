@@ -179,7 +179,7 @@ window.QuantChart = (() => {
         series: series.placement === "Main" ? "price" : "normal",
         precision: 4,
         shouldOhlc: series.placement === "Main",
-        figures: (series.outputs || []).map(output => ({
+        figures: (series.outputs || []).filter(output => output.figure !== "none").map(output => ({
           key: output.key,
           title: `${output.label}: `,
           type: output.figure === "bar" ? "bar" : "line",

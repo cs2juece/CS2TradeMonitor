@@ -1,0 +1,193 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>obj\CS2TradeMonitor.Shared\</BaseIntermediateOutputPath>
+    <BaseOutputPath>bin\CS2TradeMonitor.Shared\</BaseOutputPath>
+  </PropertyGroup>
+
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <AssemblyName>CS2TradeMonitor.Shared</AssemblyName>
+    <RootNamespace>CS2TradeMonitor.Shared</RootNamespace>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="CS2MarketData.Core\CS2MarketData.Core.csproj" />
+    <ProjectReference Include="CS2QuantWeb.Core\CS2QuantWeb.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CS2TradeMonitor" />
+    <InternalsVisibleTo Include="CS2TradeMonitor.Shared.Tests" />
+    <InternalsVisibleTo Include="CS2TradeMonitor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="resources\steamdt_items.json.gz"
+                      LogicalName="CS2TradeMonitor.Shared.Resources.steamdt_items.json.gz" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="src\Shared\**\*.cs" />
+    <Compile Include="src\Core\Settings.cs" Link="Core\Settings.cs" />
+    <Compile Include="src\Domain\InventoryMonitoring\LocalInventoryModels.cs" Link="Inventory\LocalInventoryModels.cs" />
+    <Compile Include="src\Application\Inventory\ICsqaqInventoryGateway.cs" Link="Inventory\ICsqaqInventoryGateway.cs" />
+    <Compile Include="src\Application\Inventory\CsqaqInventoryGateway.cs" Link="Inventory\CsqaqInventoryGateway.cs" />
+    <Compile Include="src\Application\Market\CsqaqRequestRateLimiter.cs" Link="Inventory\CsqaqRequestRateLimiter.cs" />
+    <Compile Include="src\Application\Market\CsqaqUrls.cs" Link="Inventory\CsqaqUrls.cs" />
+    <Compile Include="src\Application\Abstractions\IDomesticHttpClientFactory.cs" Link="Inventory\IDomesticHttpClientFactory.cs" />
+    <Compile Include="src\Application\Abstractions\ICs2UpdateReminderService.cs" Link="Notifications\ICs2UpdateReminderService.cs" />
+    <Compile Include="src\Application\Abstractions\IPhoneAlertDispatchService.cs" Link="Notifications\IPhoneAlertDispatchService.cs" />
+    <Compile Include="src\Application\Abstractions\IServerChanPushService.cs" Link="Notifications\IServerChanPushService.cs" />
+    <Compile Include="src\Application\Abstractions\IWxPusherService.cs" Link="Notifications\IWxPusherService.cs" />
+    <Compile Include="src\Application\Notify\Cs2UpdateReminderModels.cs" Link="Notifications\Cs2UpdateReminderModels.cs" />
+    <Compile Include="src\Application\Notify\Cs2UpdateReminderService.cs" Link="Notifications\Cs2UpdateReminderService.cs" />
+    <Compile Include="src\Application\Notify\Cs2UpdateUrls.cs" Link="Notifications\Cs2UpdateUrls.cs" />
+    <Compile Include="src\Application\Notify\NotificationProviderUrls.cs" Link="Notifications\NotificationProviderUrls.cs" />
+    <Compile Include="src\Application\Notify\PhoneAlertDispatchService.cs" Link="Notifications\PhoneAlertDispatchService.cs" />
+    <Compile Include="src\Application\Notify\ServerChanPushService.cs" Link="Notifications\ServerChanPushService.cs" />
+    <Compile Include="src\Application\Notify\WxPusherService.cs" Link="Notifications\WxPusherService.cs" />
+    <Compile Include="src\Core\PhoneAlertChannelDefinitionCatalog.cs" Link="Notifications\PhoneAlertChannelDefinitionCatalog.cs" />
+    <Compile Include="src\Core\PhoneAlertUrls.cs" Link="Notifications\PhoneAlertUrls.cs" />
+    <Compile Include="src\Core\SettingsPhoneAlertNormalizer.cs" Link="Notifications\SettingsPhoneAlertNormalizer.cs" />
+    <Compile Include="src\Domain\YouPin\YouPinInventoryStorageModels.cs" Link="Trading\YouPinInventoryStorageModels.cs" />
+    <Compile Include="src\Application\Abstractions\IYouPinInventoryStorageService.cs" Link="Trading\IYouPinInventoryStorageService.cs" />
+    <Compile Include="src\Application\YouPin\YouPinInventoryStoragePort.cs" Link="Trading\YouPinInventoryStoragePort.cs" />
+    <Compile Include="src\Application\YouPin\YouPinInventoryStorageQueryPendingException.cs" Link="Trading\YouPinInventoryStorageQueryPendingException.cs" />
+    <Compile Include="src\Application\YouPin\YouPinInventoryStorageService.cs" Link="Trading\YouPinInventoryStorageService.cs" />
+    <Compile Include="src\Infrastructure\YouPin\YouPinInventoryStorageHttpAdapter.cs" Link="Trading\YouPinInventoryStorageHttpAdapter.cs" />
+    <Compile Include="src\Domain\YouPin\YouPinInventoryModels.cs" Link="Trading\YouPinInventoryModels.cs" />
+    <Compile Include="src\Application\Abstractions\IYouPinInventoryService.cs" Link="Trading\IYouPinInventoryService.cs" />
+    <Compile Include="src\Application\YouPin\YouPinInventoryModels.cs" Link="Trading\YouPinInventoryStateModels.cs" />
+    <Compile Include="src\Application\YouPin\YouPinInventoryComputationHelper.cs" Link="Trading\YouPinInventoryComputationHelper.cs" />
+    <Compile Include="src\Application\YouPin\YouPinInventoryHistoryStore.cs" Link="Trading\YouPinInventoryHistoryStore.cs" />
+    <Compile Include="src\Application\YouPin\YouPinStopProfitLossRuleStore.cs" Link="Trading\YouPinStopProfitLossRuleStore.cs" />
+    <Compile Include="src\Application\YouPin\YouPinStopProfitLossAlertEvaluator.cs" Link="Trading\YouPinStopProfitLossAlertEvaluator.cs" />
+    <Compile Include="src\Application\YouPin\YouPinInventoryService.cs" Link="Trading\YouPinInventoryService.cs" />
+    <Compile Include="src\Domain\YouPin\YouPinProfitLossModels.cs" Link="Trading\YouPinProfitLossModels.cs" />
+    <Compile Include="src\Application\Abstractions\IYouPinProfitLossService.cs" Link="Trading\IYouPinProfitLossService.cs" />
+    <Compile Include="src\Application\YouPin\YouPinProfitLossRecordProjection.cs" Link="Trading\YouPinProfitLossRecordProjection.cs" />
+    <Compile Include="src\Application\YouPin\YouPinProfitLossRedesignProjection.cs" Link="Trading\YouPinProfitLossRedesignProjection.cs" />
+    <Compile Include="src\Application\YouPin\YouPinProfitLossService.cs" Link="Trading\YouPinProfitLossService.cs" />
+    <Compile Include="src\Application\Abstractions\IAppDataPathProvider.cs" Link="Platform\IAppDataPathProvider.cs" />
+    <Compile Include="src\Application\Abstractions\IAppDiagnostics.cs" Link="Platform\IAppDiagnostics.cs" />
+    <Compile Include="src\Application\Abstractions\IClock.cs" Link="Platform\IClock.cs" />
+    <Compile Include="src\Application\Abstractions\IYouPinGridTradingService.cs" Link="Trading\IYouPinGridTradingService.cs" />
+    <Compile Include="src\Application\Abstractions\IYouPinLandlordAutomation.cs" Link="Trading\IYouPinLandlordAutomation.cs" />
+    <Compile Include="src\Domain\YouPin\YouPinGridTradingModels.cs" Link="Trading\YouPinGridTradingModels.cs" />
+    <Compile Include="src\Domain\YouPin\YouPinLandlordModels.cs" Link="Trading\YouPinLandlordModels.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridTradingPorts.cs" Link="Trading\YouPinGridTradingPorts.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridStrategyFileStore.cs" Link="Trading\YouPinGridStrategyFileStore.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridMarketParser.cs" Link="Trading\YouPinGridMarketParser.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridMarketGateway.cs" Link="Trading\YouPinGridMarketGateway.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridTradingPlanner.cs" Link="Trading\YouPinGridTradingPlanner.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridExecutionJournalFileStore.cs" Link="Trading\YouPinGridExecutionJournalFileStore.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridExecutionModule.cs" Link="Trading\YouPinGridExecutionModule.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridExecutionGateway.cs" Link="Trading\YouPinGridExecutionGateway.cs" />
+    <Compile Include="src\Application\YouPin\YouPinGridTradingService.cs" Link="Trading\YouPinGridTradingService.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordPorts.cs" Link="Trading\YouPinLandlordPorts.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordGateway.cs" Link="Trading\YouPinLandlordGateway.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordRepriceProfile.cs" Link="Trading\YouPinLandlordRepriceProfile.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordUserNotice.cs" Link="Trading\YouPinLandlordUserNotice.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordAuditFileStore.cs" Link="Trading\YouPinLandlordAuditFileStore.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordDecisionRules.cs" Link="Trading\YouPinLandlordDecisionRules.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordExecutionCadence.cs" Link="Trading\YouPinLandlordExecutionCadence.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordWriteCoordinator.cs" Link="Trading\YouPinLandlordWriteCoordinator.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordRepriceExecutor.cs" Link="Trading\YouPinLandlordRepriceExecutor.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordInventoryRentExecutor.cs" Link="Trading\YouPinLandlordInventoryRentExecutor.cs" />
+    <Compile Include="src\Application\YouPin\YouPinLandlordAutomation.cs" Link="Trading\YouPinLandlordAutomation.cs" />
+    <Compile Include="src\Application\Market\SteamDtLocalItemNameResolver.cs" Link="Market\SteamDtLocalItemNameResolver.cs" />
+    <Compile Include="src\Application\Steam\SteamAutoTradeSettingsPersistence.cs" Link="Trading\SteamAutoTradeSettingsPersistence.cs" />
+    <Compile Include="src\Application\Steam\SteamAutoTradePlanner.cs" Link="Trading\SteamAutoTradePlanner.cs" />
+    <Compile Include="src\Application\Steam\AutoConfirmationService.cs" Link="Trading\AutoConfirmationService.cs" />
+    <Compile Include="src\Application\Abstractions\ISteamOfferService.cs" Link="Trading\ISteamOfferService.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferModels.cs" Link="Trading\SteamOfferStateModels.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamAuthStoreStatus.cs" Link="Trading\SteamAuthStoreStatus.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamAuthSecureStore.cs" Link="Trading\SteamAuthSecureStore.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamTokenEntry.cs" Link="Trading\SteamTokenEntry.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginModels.cs" Link="Trading\SteamLoginModels.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamCryptoHelper.cs" Link="Trading\SteamCryptoHelper.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamCredentialMasker.cs" Link="Trading\SteamCredentialMasker.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginCookieHelper.cs" Link="Trading\SteamLoginCookieHelper.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamJwtTokenParser.cs" Link="Trading\SteamJwtTokenParser.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginAuthSessionClient.cs" Link="Trading\SteamLoginAuthSessionClient.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginCryptoSupport.cs" Link="Trading\SteamLoginCryptoSupport.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginHttpDiagnostics.cs" Link="Trading\SteamLoginHttpDiagnostics.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginMobileAccessTokenResolver.cs" Link="Trading\SteamLoginMobileAccessTokenResolver.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginProtoResponses.cs" Link="Trading\SteamLoginProtoResponses.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginService.cs" Link="Trading\SteamLoginService.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginTokenTextParser.cs" Link="Trading\SteamLoginTokenTextParser.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamLoginWebPageParser.cs" Link="Trading\SteamLoginWebPageParser.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamProtoCodec.cs" Link="Trading\SteamProtoCodec.cs" />
+    <Compile Include="src\Application\Steam\Auth\SteamWebSessionValidator.cs" Link="Trading\SteamWebSessionValidator.cs" />
+    <Compile Include="src\Application\Steam\Auth\Import\OtpAuthImporter.cs" Link="Trading\Import\OtpAuthImporter.cs" />
+    <Compile Include="src\Application\Steam\Auth\Import\SteamMaFileImportPreparer.cs" Link="Trading\Import\SteamMaFileImportPreparer.cs" />
+    <Compile Include="src\Application\Steam\Auth\Import\TokenImporterChain.cs" Link="Trading\Import\TokenImporterChain.cs" />
+    <Compile Include="src\Application\Steam\Auth\Import\TokenImportResult.cs" Link="Trading\Import\TokenImportResult.cs" />
+    <Compile Include="src\Application\Abstractions\ISteamAuthStore.cs" Link="Trading\ISteamAuthStore.cs" />
+    <Compile Include="src\Application\Abstractions\ISteamConfirmationClient.cs" Link="Trading\ISteamConfirmationClient.cs" />
+    <Compile Include="src\Application\Abstractions\ISteamLoginService.cs" Link="Trading\ISteamLoginService.cs" />
+    <Compile Include="src\Application\Abstractions\ISteamTokenVault.cs" Link="Trading\ISteamTokenVault.cs" />
+    <Compile Include="src\Application\Abstractions\ISteamTradeOfferClient.cs" Link="Trading\ISteamTradeOfferClient.cs" />
+    <Compile Include="src\Application\Abstractions\ISteamRoutedHttpClientFactory.cs" Link="Trading\ISteamRoutedHttpClientFactory.cs" />
+    <Compile Include="src\Application\TradeWriteOperationGate.cs" Link="Trading\TradeWriteOperationGate.cs" />
+    <Compile Include="src\Application\Steam\SteamApiKeyRefreshGate.cs" Link="Trading\SteamApiKeyRefreshGate.cs" />
+    <Compile Include="src\Application\Steam\SteamAssetNameCompletionHelper.cs" Link="Trading\SteamAssetNameCompletionHelper.cs" />
+    <Compile Include="src\Application\Steam\SteamAutoTradeProjection.cs" Link="Trading\SteamAutoTradeProjection.cs" />
+    <Compile Include="src\Application\Steam\SteamConfirmationModels.cs" Link="Trading\SteamConfirmationModels.cs" />
+    <Compile Include="src\Application\Steam\SteamConfirmationClient.cs" Link="Trading\SteamConfirmationClient.cs" />
+    <Compile Include="src\Application\Steam\SteamCookieValue.cs" Link="Trading\SteamCookieValue.cs" />
+    <Compile Include="src\Application\Steam\SteamHttpExceptions.cs" Link="Trading\SteamHttpExceptions.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferAccountRefreshCoordinator.cs" Link="Trading\SteamOfferAccountRefreshCoordinator.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferCredentialWorkflow.cs" Link="Trading\SteamOfferCredentialWorkflow.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferLoginRecoveryCoordinator.cs" Link="Trading\SteamOfferLoginRecoveryCoordinator.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferLoginRecoveryHelper.cs" Link="Trading\SteamOfferLoginRecoveryHelper.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferMappingHelper.cs" Link="Trading\SteamOfferMappingHelper.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferMockOfferFactory.cs" Link="Trading\SteamOfferMockOfferFactory.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferSafetyEvaluator.cs" Link="Trading\SteamOfferSafetyEvaluator.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferService.cs" Link="Trading\SteamOfferService.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferService.Enrichment.cs" Link="Trading\SteamOfferService.Enrichment.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferStateHelper.cs" Link="Trading\SteamOfferStateHelper.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferStateStore.cs" Link="Trading\SteamOfferStateStore.cs" />
+    <Compile Include="src\Application\Steam\SteamOfferYouPinVerificationHelper.cs" Link="Trading\SteamOfferYouPinVerificationHelper.cs" />
+    <Compile Include="src\Application\Steam\SteamTradeOfferWebHtmlParser.cs" Link="Trading\SteamTradeOfferWebHtmlParser.cs" />
+    <Compile Include="src\Application\Steam\SteamTradeOfferClient.cs" Link="Trading\SteamTradeOfferClient.cs" />
+    <Compile Include="src\Application\Steam\SteamUrls.cs" Link="Trading\SteamUrls.cs" />
+    <Compile Include="src\Domain\Steam\SteamAuthModels.cs" Link="Trading\SteamAuthModels.cs" />
+    <Compile Include="src\Application\YouPin\YouPinQuoteLocalState.cs" Link="Trading\YouPinQuoteLocalState.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleOrderActionResolver.cs" Link="Trading\YouPinSaleOrderActionResolver.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderModels.cs" Link="Trading\YouPinSaleReminderModels.cs" />
+    <Compile Include="src\Application\Abstractions\IYouPinAuthService.cs" Link="Trading\IYouPinAuthService.cs" />
+    <Compile Include="src\Application\YouPin\YouPinAuthService.cs" Link="Trading\YouPinAuthService.cs" />
+    <Compile Include="src\Application\Abstractions\IYouPinSaleReminderService.cs" Link="Trading\IYouPinSaleReminderService.cs" />
+    <Compile Include="src\Application\Abstractions\IManualYouPinOfferAutoConfirmation.cs" Link="Trading\IManualYouPinOfferAutoConfirmation.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderService.cs" Link="Trading\YouPinSaleReminderService.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderRemoteClient.cs" Link="Trading\YouPinSaleReminderRemoteClient.cs" />
+    <Compile Include="src\Application\YouPin\YouPinRentalOfferConfirmationClient.cs" Link="Trading\YouPinRentalOfferConfirmationClient.cs" />
+    <Compile Include="src\Application\YouPin\YouPinDeviceHeartbeatResult.cs" Link="Trading\YouPinDeviceHeartbeatResult.cs" />
+    <Compile Include="src\Application\YouPin\YouPinJsonElementReader.cs" Link="Trading\YouPinJsonElementReader.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleActionResultHelper.cs" Link="Trading\YouPinSaleActionResultHelper.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleNotificationHelper.cs" Link="Trading\YouPinSaleNotificationHelper.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleOrderGroupHelper.cs" Link="Trading\YouPinSaleOrderGroupHelper.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleOrderParser.cs" Link="Trading\YouPinSaleOrderParser.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderHttpHelper.cs" Link="Trading\YouPinSaleReminderHttpHelper.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderHistoryHelper.cs" Link="Trading\YouPinSaleReminderHistoryHelper.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderHistoryStore.cs" Link="Trading\YouPinSaleReminderHistoryStore.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderStateFactory.cs" Link="Trading\YouPinSaleReminderStateFactory.cs" />
+    <Compile Include="src\Application\YouPin\YouPinSaleReminderMockOrderFactory.cs" Link="Trading\YouPinSaleReminderMockOrderFactory.cs" />
+    <Compile Include="src\Application\YouPin\YouPinMobileApiClient.cs" Link="Trading\YouPinMobileApiClient.cs" />
+    <Compile Include="src\Application\YouPin\YouPinRateLimitException.cs" Link="Trading\YouPinRateLimitException.cs" />
+    <Compile Include="src\Application\YouPin\YouPinUrls.cs" Link="Trading\YouPinUrls.cs" />
+    <Compile Include="src\Core\Lifecycle\PeriodicAsyncSingleFlight.cs" Link="Core\PeriodicAsyncSingleFlight.cs" />
+    <Compile Include="src\Domain\Steam\SteamOfferModels.cs" Link="Trading\SteamOfferModels.cs" />
+    <Compile Include="src\Domain\YouPin\YouPinSaleOrderModels.cs" Link="Trading\YouPinSaleOrderModels.cs" />
+    <Compile Include="src\Domain\YouPin\YouPinCredentialModels.cs" Link="Trading\YouPinCredentialModels.cs" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

@@ -154,14 +154,26 @@ internal static class TechnicalIndicators
         double?[] mid = MovingAverage(close, period);
         var upper = new double?[close.Length];
         var lower = new double?[close.Length];
+        var bandwidth = new double?[close.Length];
+        var bandwidthChange = new double?[close.Length];
         for (int i = period - 1; i < close.Length; i++)
         {
             double average = mid[i]!.Value;
             double deviation = Math.Sqrt(close.Skip(i - period + 1).Take(period).Sum(value => Math.Pow(value - average, 2)) / period);
             upper[i] = average + multiplier * deviation;
             lower[i] = average - multiplier * deviation;
+            bandwidth[i] = average == 0 ? null : (upper[i] - lower[i]) / Math.Abs(average) * 100;
+            if (i > period - 1 && bandwidth[i - 1].HasValue && bandwidth[i].HasValue)
+                bandwidthChange[i] = bandwidth[i] - bandwidth[i - 1];
         }
-        return Rows(candles.Count, [("upper", upper), ("mid", mid), ("lower", lower)]);
+        return Rows(candles.Count,
+        [
+            ("upper", upper),
+            ("mid", mid),
+            ("lower", lower),
+            ("bandwidth", bandwidth),
+            ("bandwidthChange", bandwidthChange)
+        ]);
     }
 
     private static IReadOnlyList<Dictionary<string, double?>> Sar(IReadOnlyList<QuantCandle> candles, double[] parameters)

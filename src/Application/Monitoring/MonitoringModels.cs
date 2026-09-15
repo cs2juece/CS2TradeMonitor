@@ -8,11 +8,12 @@ namespace CS2TradeMonitor.Application.Monitoring
         public const string Item = "单品监控";
         public const string Inventory = "悠悠库存";
         public const string InventoryStopProfitLoss = "库存止盈止损";
+        public const string LocalInventory = "本机库存监控";
         public const string Cs2Update = "CS2 更新";
 
         public static bool IsAppNotificationSource(string? source)
         {
-            return source is Item or Inventory or InventoryStopProfitLoss;
+            return source is Item or Inventory or InventoryStopProfitLoss or LocalInventory;
         }
     }
 

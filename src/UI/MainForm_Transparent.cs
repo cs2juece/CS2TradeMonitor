@@ -31,6 +31,7 @@ namespace CS2TradeMonitor
         private readonly IRenderScheduler _renderScheduler;
         private readonly ISoftwareUpdateService _softwareUpdates;
         private readonly SoftwareUpdateAutoCheckCoordinator _softwareUpdateAutoCheck;
+        private readonly MainFormWindowPresentationState _windowPresentationState = new();
         private readonly int _wmTaskbarCreated;
         private const int WM_DISPLAYCHANGE = 0x007E;
         private const int WM_CONTEXTMENU = 0x007B;
@@ -71,7 +72,7 @@ namespace CS2TradeMonitor
                     cp.ExStyle &= ~WS_EX_APPWINDOW;
                 }
 
-                if (_cfg != null && _cfg.TopMost)
+                if (_cfg != null && (_windowPresentationState?.ResolveTopMost(_cfg.TopMost) ?? _cfg.TopMost))
                 {
                     cp.ExStyle |= WS_EX_TOPMOST; // 防止句柄重建后丢失置顶样式
                 }
@@ -112,7 +113,7 @@ namespace CS2TradeMonitor
                 WindowState = oldState;
             }
 
-            _winHelper.RefreshTopMost(_cfg.TopMost, forceReinsert: true);
+            RefreshConfiguredTopMost(forceReinsert: true);
             _winHelper.ApplyRoundedCorners();
             _bizHelper?.RebuildMenus();
             RequestLayeredRender();
@@ -142,7 +143,24 @@ namespace CS2TradeMonitor
         public void ApplyRoundedCorners() => _winHelper.ApplyRoundedCorners();
         public void RefreshTopMost(bool forceReinsert = false)
         {
-            _winHelper.RefreshTopMost(_cfg.TopMost, forceReinsert);
+            RefreshConfiguredTopMost(forceReinsert);
+        }
+
+        internal void BeginSettingsWindowPresentation()
+        {
+            if (_windowPresentationState.BeginSettingsWindowPresentation())
+                _winHelper.RefreshTopMost(enabled: false, forceReinsert: true);
+        }
+
+        internal void EndSettingsWindowPresentation()
+        {
+            if (_windowPresentationState.EndSettingsWindowPresentation())
+                RefreshConfiguredTopMost(forceReinsert: true);
+        }
+
+        private void RefreshConfiguredTopMost(bool forceReinsert = false)
+        {
+            _winHelper.RefreshTopMost(_windowPresentationState.ResolveTopMost(_cfg.TopMost), forceReinsert);
         }
 
         // 供外部调用
@@ -394,8 +412,8 @@ namespace CS2TradeMonitor
                 _winHelper.ApplyRoundedCorners();
                 RequestLayeredRender();
             };
-            this.VisibleChanged += (_, __) => { if (Visible) _winHelper.RefreshTopMost(_cfg.TopMost, forceReinsert: true); };
-            this.HandleCreated += (_, __) => _winHelper.RefreshTopMost(_cfg.TopMost, forceReinsert: true);
+            this.VisibleChanged += (_, __) => { if (Visible) RefreshConfiguredTopMost(forceReinsert: true); };
+            this.HandleCreated += (_, __) => RefreshConfiguredTopMost(forceReinsert: true);
         }
 
         public void ShowMainWindow()
@@ -407,7 +425,7 @@ namespace CS2TradeMonitor
             _cfg.Save();
 
             _bizHelper.ForceShow(30.0);
-            _winHelper.RefreshTopMost(_cfg.TopMost, forceReinsert: true);
+            RefreshConfiguredTopMost(forceReinsert: true);
             _winHelper.ApplyRoundedCorners();
             _bizHelper.RebuildMenus();
             RequestLayeredRender();
@@ -682,10 +700,7 @@ namespace CS2TradeMonitor
                     this.BeginInvoke(new Action(async () =>
                     {
                         await Task.Delay(3000);
-                        if (!CS2TradeMonitor.src.Core.Actions.AppActions.HasOpenSettingsWindow())
-                        {
-                            _winHelper.RefreshTopMost(true, forceReinsert: true);
-                        }
+                        RefreshConfiguredTopMost(forceReinsert: true);
                     }));
                 }
 

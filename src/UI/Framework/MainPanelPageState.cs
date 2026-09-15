@@ -1,4 +1,5 @@
 using CS2TradeMonitor.src.Core;
+using CS2TradeMonitor.Shared.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -212,80 +213,14 @@ namespace CS2TradeMonitor.src.UI.Framework
     internal static class MainPanelSettingsRules
     {
         public static IReadOnlyList<MainPanelSettingAssignment> BuildTaskbarStylePreset(bool bold)
-        {
-            return new[]
-            {
-                Assign(nameof(Settings.TaskbarPresetStyle), bold ? 1 : 0),
-                Assign(nameof(Settings.TaskbarCustomLayout), true),
-                Assign(nameof(Settings.TaskbarFontFamily), Settings.DEFAULT_TB_FONT),
-                Assign(nameof(Settings.TaskbarFontSize), bold ? Settings.DEFAULT_TB_SIZE_BOLD : Settings.DEFAULT_TB_SIZE_REGULAR),
-                Assign(nameof(Settings.TaskbarFontBold), bold),
-                Assign(nameof(Settings.TaskbarInnerSpacing), bold ? Settings.DEFAULT_TB_INNER_BOLD : Settings.DEFAULT_TB_INNER_REGULAR),
-                Assign(nameof(Settings.TaskbarVerticalPadding), Settings.DEFAULT_TB_VOFF)
-            };
-        }
+            => InterfaceSettingsRules.BuildTaskbarStylePreset(bold)
+                .Select(assignment => new MainPanelSettingAssignment(assignment.Key, assignment.Value))
+                .ToArray();
 
         public static IReadOnlyList<MainPanelSettingAssignment> BuildTaskbarPreset(int type)
-        {
-            return type switch
-            {
-                0 => new[]
-                {
-                    Assign(nameof(Settings.TaskbarPresetStyle), 1),
-                    Assign(nameof(Settings.TaskbarCustomLayout), true),
-                    Assign(nameof(Settings.TaskbarCustomStyle), true),
-                    Assign(nameof(Settings.TaskbarFontFamily), Settings.DEFAULT_TB_FONT),
-                    Assign(nameof(Settings.TaskbarFontSize), Settings.DEFAULT_TB_SIZE_BOLD),
-                    Assign(nameof(Settings.TaskbarFontBold), true),
-                    Assign(nameof(Settings.TaskbarItemSpacing), Settings.DEFAULT_TB_GAP),
-                    Assign(nameof(Settings.TaskbarInnerSpacing), Settings.DEFAULT_TB_INNER_BOLD),
-                    Assign(nameof(Settings.TaskbarVerticalPadding), Settings.DEFAULT_TB_VOFF),
-                    Assign(nameof(Settings.Skin), "DarkFlat_Classic")
-                },
-                1 => new[]
-                {
-                    Assign(nameof(Settings.TaskbarPresetStyle), 0),
-                    Assign(nameof(Settings.TaskbarCustomLayout), true),
-                    Assign(nameof(Settings.TaskbarFontSize), 9f),
-                    Assign(nameof(Settings.TaskbarItemSpacing), 4),
-                    Assign(nameof(Settings.TaskbarInnerSpacing), 4),
-                    Assign(nameof(Settings.TaskbarVerticalPadding), 2),
-                    Assign(nameof(Settings.TaskbarSingleLine), true),
-                    Assign(nameof(Settings.TaskbarFontBold), false)
-                },
-                2 => new[]
-                {
-                    Assign(nameof(Settings.TaskbarCustomLayout), true),
-                    Assign(nameof(Settings.TaskbarFontSize), 12f),
-                    Assign(nameof(Settings.TaskbarFontBold), true),
-                    Assign(nameof(Settings.TaskbarItemSpacing), 6),
-                    Assign(nameof(Settings.TaskbarInnerSpacing), 8),
-                    Assign(nameof(Settings.TaskbarVerticalPadding), 2),
-                    Assign(nameof(Settings.TaskbarCustomStyle), true),
-                    Assign(nameof(Settings.TaskbarColorBg), "#001E3D"),
-                    Assign(nameof(Settings.TaskbarColorLabel), "#FFFFFF"),
-                    Assign(nameof(Settings.TaskbarColorCrit), "#FF4444"),
-                    Assign(nameof(Settings.TaskbarColorSafe), "#00CC66"),
-                    Assign(nameof(Settings.TaskbarColorWarn), "#FFFF00")
-                },
-                3 => new[]
-                {
-                    Assign(nameof(Settings.TaskbarCustomLayout), true),
-                    Assign(nameof(Settings.TaskbarFontSize), 11f),
-                    Assign(nameof(Settings.TaskbarFontBold), true),
-                    Assign(nameof(Settings.TaskbarItemSpacing), 6),
-                    Assign(nameof(Settings.TaskbarInnerSpacing), 8),
-                    Assign(nameof(Settings.TaskbarVerticalPadding), 2),
-                    Assign(nameof(Settings.TaskbarCustomStyle), true),
-                    Assign(nameof(Settings.TaskbarColorBg), "#001E3D"),
-                    Assign(nameof(Settings.TaskbarColorLabel), "#FFD700"),
-                    Assign(nameof(Settings.TaskbarColorCrit), "#FF4444"),
-                    Assign(nameof(Settings.TaskbarColorSafe), "#00FFCC"),
-                    Assign(nameof(Settings.TaskbarColorWarn), "#FFFF00")
-                },
-                _ => Array.Empty<MainPanelSettingAssignment>()
-            };
-        }
+            => InterfaceSettingsRules.BuildTaskbarPreset(type)
+                .Select(assignment => new MainPanelSettingAssignment(assignment.Key, assignment.Value))
+                .ToArray();
 
         public static MainPanelSafeVisibilityResult ResolveSafeVisibility(
             bool hideMainForm,
@@ -294,17 +229,16 @@ namespace CS2TradeMonitor.src.UI.Framework
             bool clickThrough,
             bool taskbarClickThrough)
         {
-            bool noInteractiveEntry = (hideMainForm || clickThrough)
-                && (!showTaskbar || taskbarClickThrough)
-                && hideTrayIcon;
-            return noInteractiveEntry
-                ? new MainPanelSafeVisibilityResult(true, HideMainForm: false, ShowTaskbar: true)
-                : new MainPanelSafeVisibilityResult(false, hideMainForm, showTaskbar);
-        }
-
-        private static MainPanelSettingAssignment Assign(string key, object value)
-        {
-            return new MainPanelSettingAssignment(key, value);
+            InterfaceSafeVisibilityResult result = InterfaceSettingsRules.ResolveSafeVisibility(
+                hideMainForm,
+                hideTrayIcon,
+                showTaskbar,
+                clickThrough,
+                taskbarClickThrough);
+            return new MainPanelSafeVisibilityResult(
+                result.RequiresCorrection,
+                result.HideMainForm,
+                result.ShowTaskbar);
         }
     }
 }
